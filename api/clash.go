@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"regexp"
@@ -70,8 +71,18 @@ func LoadClashAPIConfig(configPath string) (baseURL, token string, err error) {
 
 const (
 	httpDialTimeoutSeconds    = 5
-	httpRequestTimeoutSeconds = 10
+	httpRequestTimeoutSeconds = 20 // Increased to 20 seconds for better reliability
 )
+
+// Global HTTP client with timeout for all HTTP requests
+var httpClient = &http.Client{
+	Timeout: time.Duration(httpRequestTimeoutSeconds) * time.Second,
+	Transport: &http.Transport{
+		DialContext: (&net.Dialer{
+			Timeout: time.Duration(httpDialTimeoutSeconds) * time.Second,
+		}).DialContext,
+	},
+}
 
 // TestAPIConnection attempts to connect to the Clash API.
 func TestAPIConnection(baseURL, token string, logFile *os.File) error {
@@ -92,8 +103,7 @@ func TestAPIConnection(baseURL, token string, logFile *os.File) error {
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 
-	client := &http.Client{Timeout: time.Duration(httpRequestTimeoutSeconds) * time.Second}
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		if logFile != nil {
 			fmt.Fprint(logFile, fmt.Sprintf("[%s] Error executing API test request: %v\n", time.Now().Format("2006-01-02 15:04:05"), err))
@@ -150,8 +160,7 @@ func GetProxiesInGroup(baseURL, token, groupName string, logFile *os.File) ([]Pr
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 
-	client := &http.Client{Timeout: time.Duration(httpRequestTimeoutSeconds) * time.Second}
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		logMsg("GetProxiesInGroup: ERROR: Failed to execute request: %v", err)
 		return nil, "", fmt.Errorf("failed to execute /proxies request: %w", err)
@@ -261,8 +270,7 @@ func SwitchProxy(baseURL, token, group, proxy string, logFile *os.File) error {
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: time.Duration(httpRequestTimeoutSeconds) * time.Second}
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		if logFile != nil {
 			fmt.Fprint(logFile, fmt.Sprintf("[%s] Error executing switch request for %s/%s: %v\n", time.Now().Format("2006-01-02 15:04:05"), group, proxy, err))
@@ -308,8 +316,7 @@ func GetDelay(baseURL, token, proxyName string, logFile *os.File) (int64, error)
 
 	req.Header.Set("Authorization", "Bearer "+token)
 
-	client := &http.Client{Timeout: time.Duration(httpRequestTimeoutSeconds) * time.Second}
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		if logFile != nil {
 			fmt.Fprint(logFile, fmt.Sprintf("[%s] Error executing delay request for %s: %v\n", time.Now().Format("2006-01-02 15:04:05"), proxyName, err))
