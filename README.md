@@ -20,6 +20,32 @@ Cross-platform GUI launcher for [sing-box](https://github.com/SagerNet/sing-box)
 - 🔔 **System Tray**: Run from system tray
 - 📝 **Logging**: Detailed logs of all operations
 
+## Why this launcher?
+
+Most Windows users run sing-box like this:
+
+- `sing-box.exe` + `config.json` in the same folder  
+- Black CMD window always open  
+- To switch a node: edit JSON in Notepad → kill the process → run again  
+- Logs disappear into nowhere
+
+This launcher solves all of that. Everything is controlled from one clean GUI:
+
+### What it gives you
+
+- **One-click start/stop for TUN mode**  
+- **Full access to `config.json` inside the launcher**  
+  (edit → save → sing-box restarts automatically)
+- **Auto-parsing of any subscription type**  
+  (vless / vmess / trojan / ss / hysteria / tuic)  
+  + filters by tags and regex
+- **Server selection with ping via Clash Meta API**  
+- **Diagnostics tools**: IP-check, STUN test, process killer  
+- **System tray integration + readable logs**
+
+**GitHub:** https://github.com/Leadaxe/singbox-launcher  
+**Example config:** https://github.com/Leadaxe/singbox-launcher/blob/main/bin/config.json.example
+
 ## 📋 Requirements
 
 ### Windows
