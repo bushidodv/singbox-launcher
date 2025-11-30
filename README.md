@@ -1,12 +1,12 @@
 # Sing-Box Launcher
 
-[![GitHub](https://img.shields.io/badge/GitHub-Liveafun%2Fsingbox--launcher-blue)](https://github.com/Liveafun/singbox-launcher)
+[![GitHub](https://img.shields.io/badge/GitHub-Leadaxe%2Fsingbox--launcher-blue)](https://github.com/Leadaxe/singbox-launcher)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Go Version](https://img.shields.io/badge/Go-1.24%2B-blue)](https://golang.org/)
 
 Кроссплатформенный графический лаунчер для [sing-box](https://github.com/SagerNet/sing-box) - универсального прокси-клиента.
 
-**Репозиторий**: [https://github.com/Liveafun/singbox-launcher](https://github.com/Liveafun/singbox-launcher)
+**Репозиторий**: [https://github.com/Leadaxe/singbox-launcher](https://github.com/Leadaxe/singbox-launcher)
 
 ## 🚀 Возможности
 
@@ -37,7 +37,7 @@
 
 ### Windows
 
-1. Скачайте последний релиз с [GitHub Releases](https://github.com/Liveafun/singbox-launcher/releases)
+1. Скачайте последний релиз с [GitHub Releases](https://github.com/Leadaxe/singbox-launcher/releases)
 2. Распакуйте архив в любую папку (например, `C:\Program Files\singbox-launcher`)
 3. Поместите следующие файлы в папку `bin\`:
    - `sing-box.exe` - из [релизов sing-box](https://github.com/SagerNet/sing-box/releases)
@@ -487,7 +487,7 @@ sudo setcap cap_net_admin+ep ./singbox-launcher
 
 1. Клонируйте репозиторий:
 ```batch
-git clone https://github.com/Liveafun/singbox-launcher.git
+git clone https://github.com/Leadaxe/singbox-launcher.git
 cd singbox-launcher
 ```
 
@@ -508,7 +508,7 @@ go build -ldflags="-H windowsgui -s -w" -o singbox-launcher.exe
 
 ```bash
 # Клонируйте репозиторий
-git clone https://github.com/Liveafun/singbox-launcher.git
+git clone https://github.com/Leadaxe/singbox-launcher.git
 cd singbox-launcher
 
 # Установите зависимости
@@ -528,7 +528,7 @@ GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o singbox-launcher
 
 ```bash
 # Клонируйте репозиторий
-git clone https://github.com/Liveafun/singbox-launcher.git
+git clone https://github.com/Leadaxe/singbox-launcher.git
 cd singbox-launcher
 
 # Установите зависимости
@@ -572,8 +572,8 @@ GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o singbox-launcher
 
 ## 📞 Поддержка
 
-- **Issues**: [GitHub Issues](https://github.com/Liveafun/singbox-launcher/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/Liveafun/singbox-launcher/discussions)
+- **Issues**: [GitHub Issues](https://github.com/Leadaxe/singbox-launcher/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/Leadaxe/singbox-launcher/discussions)
 
 ## 🔮 Планы на будущее
 

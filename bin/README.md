@@ -87,7 +87,7 @@ This release includes prebuilt `sing-box.exe` (Windows) / `sing-box` (macOS/Linu
 
 ## 🔗 Ссылки
 
-- **Репозиторий проекта**: [https://github.com/Liveafun/singbox-launcher](https://github.com/Liveafun/singbox-launcher)
+- **Репозиторий проекта**: [https://github.com/Leadaxe/singbox-launcher](https://github.com/Leadaxe/singbox-launcher)
 - **Официальный sing-box**: [https://github.com/SagerNet/sing-box](https://github.com/SagerNet/sing-box)
 - **Документация sing-box**: [https://sing-box.sagernet.org/](https://sing-box.sagernet.org/)
 
@@ -97,7 +97,7 @@ This release includes prebuilt `sing-box.exe` (Windows) / `sing-box` (macOS/Linu
 
 1. Проверьте логи в папке `logs/`
 2. Убедитесь, что все файлы на месте (используйте кнопку "Check Files" в лаунчере)
-3. Откройте [Issue на GitHub](https://github.com/Liveafun/singbox-launcher/issues)
+3. Откройте [Issue на GitHub](https://github.com/Leadaxe/singbox-launcher/issues)
 
 ---
 
