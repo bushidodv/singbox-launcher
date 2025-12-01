@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"singbox-launcher/internal/constants"
 )
 
 // GetExecutableNames returns platform-specific executable names
@@ -57,9 +59,9 @@ func GetRequiredFiles(execDir string) []struct {
 		Name string
 		Path string
 	}{
-		{"Sing-Box", filepath.Join(execDir, "bin", "sing-box")},
-		{"Config.json", filepath.Join(execDir, "bin", "config.json")},
-		{"Parser", filepath.Join(execDir, "bin", "parser")},
+		{"Sing-Box", filepath.Join(execDir, constants.BinDirName, constants.SingBoxExecName)},
+		{"Config.json", filepath.Join(execDir, constants.BinDirName, constants.ConfigFileName)},
+		{"Parser", filepath.Join(execDir, constants.BinDirName, constants.ParserExecName)},
 	}
 }
 

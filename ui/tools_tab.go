@@ -39,11 +39,17 @@ func CreateToolsTab(ac *core.AppController) fyne.CanvasObject {
 		}()
 	})
 
+	checkUpdatesButton := widget.NewButton("Check for Updates", func() {
+		ac.CheckForUpdates()
+	})
+
 	return container.NewVBox(
 		logsButton,
 		updateButton,
 		configButton,
 		killButton,
+		widget.NewSeparator(),
+		checkUpdatesButton,
 	)
 }
 

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/driver/desktop"
 
 	// Import our new packages
@@ -60,23 +59,9 @@ func main() {
 	controller.MainWindow = controller.Application.NewWindow("Simple Sing-Box Launcher") // Create the main application window
 	controller.MainWindow.SetIcon(controller.AppIconData)
 
-	// Create tabs for the main window: "Control", "Diagnostics", "Tools", "Clash API"
-	tabs := container.NewAppTabs(
-		container.NewTabItem("Control", ui.CreateControlTab(controller)),
-		container.NewTabItem("Diagnostics", ui.CreateDiagnosticsTab(controller)),
-		container.NewTabItem("Tools", ui.CreateToolsTab(controller)),
-		container.NewTabItem("Clash API", ui.CreateClashAPITab(controller)),
-	)
-
-	tabs.OnSelected = func(item *container.TabItem) {
-		// Проверяем, является ли выбранная вкладка "Clash API"
-		if item.Text == "Clash API" {
-			// Вызываем метод контроллера для автоматического теста и загрузки
-			controller.RefreshAPIFunc()
-		}
-	}
-
-	controller.MainWindow.SetContent(tabs)               // Set the window's content
+	// Create App structure to manage UI
+	app := ui.NewApp(controller.MainWindow, controller)
+	controller.MainWindow.SetContent(app.GetTabs())               // Set the window's content
 	controller.MainWindow.Resize(fyne.NewSize(350, 450)) // initial window size
 	controller.MainWindow.CenterOnScreen()               // Center the window on the screen
 

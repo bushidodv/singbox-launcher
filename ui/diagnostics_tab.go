@@ -13,6 +13,7 @@ import (
 	"github.com/pion/stun"
 
 	"singbox-launcher/core"
+	"singbox-launcher/internal/constants"
 	"singbox-launcher/internal/platform"
 )
 
@@ -84,7 +85,7 @@ func CreateDiagnosticsTab(ac *core.AppController) fyne.CanvasObject {
 		waitDialog.Show()
 
 		go func() {
-			stunServer := "stun.l.google.com:19302"
+			stunServer := constants.DefaultSTUNServer
 			ip, err := checkSTUN(stunServer)
 
 			// Закрываем диалог ожидания и показываем результат

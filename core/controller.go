@@ -19,6 +19,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"singbox-launcher/api"
+	"singbox-launcher/internal/constants"
 	"singbox-launcher/internal/platform"
 
 	ps "github.com/mitchellh/go-ps"
@@ -26,10 +27,10 @@ import (
 
 // Constants for log file names
 const (
-	logFileName             = "logs/singbox-launcher.log"
-	childLogFileName        = "logs/sing-box.log"
-	parserLogFileName       = "logs/parser.log"
-	apiLogFileName          = "logs/api.log"
+	logFileName             = "logs/" + constants.MainLogFileName
+	childLogFileName        = "logs/" + constants.ChildLogFileName
+	parserLogFileName       = "logs/" + constants.ParserLogFileName
+	apiLogFileName          = "logs/" + constants.APILogFileName
 	restartAttempts         = 3
 	restartDelay            = 2 * time.Second
 	stabilityThreshold      = 180 * time.Second
@@ -492,7 +493,7 @@ func StartSingBoxProcess(ac *AppController) {
 		log.Println("startSingBox: Warning: sing-box log file not available, output will not be logged.")
 	}
 	if err := ac.SingboxCmd.Start(); err != nil {
-		ac.ShowErrorDialog(fmt.Errorf("Failed to start Sing-Box process: %w", err))
+		ac.ShowStartupError(fmt.Errorf("failed to start Sing-Box process: %w", err))
 		log.Printf("startSingBox: Failed to start Sing-Box: %v", err)
 		return
 	}
@@ -639,8 +640,7 @@ func RunParserProcess(ac *AppController) {
 	// Обрабатываем результат
 	if err != nil {
 		log.Printf("RunParser: Failed to update config: %v", err)
-		// Показываем пользователю ошибку через стандартный диалог
-		ac.ShowErrorDialog(fmt.Errorf("Failed to update config: %w", err))
+		ac.ShowParserError(fmt.Errorf("failed to update config: %w", err))
 	} else {
 		log.Println("RunParser: Config updated successfully.")
 		ac.ShowAutoHideInfo("Parser", "Config updated successfully!")
@@ -666,16 +666,20 @@ func CheckIfSingBoxRunningAtStartUtil(ac *AppController) {
 func CheckConfigFileExists(ac *AppController) {
 	if _, err := os.Stat(ac.ConfigPath); os.IsNotExist(err) {
 		log.Printf("CheckConfigFileExists: config.json not found at %s", ac.ConfigPath)
-		examplePath := filepath.Join(platform.GetBinDir(ac.ExecDir), "config.json.example")
+		examplePath := filepath.Join(platform.GetBinDir(ac.ExecDir), constants.ConfigExampleName)
 		
 		message := fmt.Sprintf(
 			"⚠️ Файл конфигурации не найден!\n\n"+
-				"Файл config.json отсутствует в папке bin/.\n\n"+
+				"Файл %s отсутствует в папке bin/.\n\n"+
 				"Для начала работы:\n"+
-				"1. Скопируйте файл config.json.example в config.json\n"+
-				"2. Откройте config.json и заполните его своими настройками\n"+
+				"1. Скопируйте файл %s в %s\n"+
+				"2. Откройте %s и заполните его своими настройками\n"+
 				"3. Перезапустите приложение\n\n"+
 				"Пример конфигурации находится здесь:\n%s",
+			constants.ConfigFileName,
+			constants.ConfigExampleName,
+			constants.ConfigFileName,
+			constants.ConfigFileName,
 			examplePath,
 		)
 		
