@@ -26,7 +26,7 @@ import (
 )
 
 // Constants for log file names
-const (
+	const (
 	logFileName             = "logs/" + constants.MainLogFileName
 	childLogFileName        = "logs/" + constants.ChildLogFileName
 	parserLogFileName       = "logs/" + constants.ParserLogFileName
@@ -37,7 +37,6 @@ const (
 	gracefulShutdownTimeout = 2 * time.Second
 	processWaitTimeout      = 30 * time.Second // Timeout for process.Wait() to prevent hanging
 	maxLogFileSize          = 10 * 1024 * 1024 // 10 MB - maximum log file size before rotation
-	minProcessRuntime       = 2 * time.Second  // Minimum runtime to consider process successful
 )
 
 // AppController - the main structure encapsulating all application state and logic.
@@ -498,13 +497,12 @@ func StartSingBoxProcess(ac *AppController) {
 		log.Printf("startSingBox: Failed to start Sing-Box: %v", err)
 		return
 	}
-	startTime := time.Now()
 	ac.RunningState.Set(true)
 	ac.StoppedByUser = false
 	//Добавляем лог с PID
-	log.Printf("startSingBox: Sing-Box started. PID=%d at %v", ac.SingboxCmd.Process.Pid, startTime)
+	log.Printf("startSingBox: Sing-Box started. PID=%d", ac.SingboxCmd.Process.Pid)
 
-	go MonitorSingBoxProcess(ac, ac.SingboxCmd, startTime)
+	go MonitorSingBoxProcess(ac, ac.SingboxCmd)
 }
 
 // MonitorSingBoxProcess monitors the sing-box process.
