@@ -1,0 +1,297 @@
+/**
+ * ============================================================================
+ * CONFIG.JSON SETUP INSTRUCTIONS
+ * ============================================================================
+ * 
+ * This file is an example configuration for sing-box launcher.
+ * 
+ * GETTING STARTED:
+ * 
+ * 1. Copy this file to config.json:
+ *    - Windows: copy config.example.json to config.json in the same bin/ folder
+ *    - macOS/Linux: cp bin/config.example.json bin/config.json
+ * 
+ * 2. Open config.json in a text editor and fill in:
+ *    - In the @ParcerConfig block, specify your subscription URL
+ *      Replace "https://your-subscription-url-here" with your actual subscription URL
+ *    - In the experimental.clash_api section, change "secret" to your token
+ *      Replace "CHANGE_THIS_TO_YOUR_SECRET_TOKEN" with a random string
+ *    - Configure DNS, routing rules, and other parameters as needed
+ * 
+ * 3. Save the file and launch singbox-launcher
+ * 
+ * 4. In the application, click the "Update Config" button in the "Tools" tab
+ *    This will automatically load proxies from your subscription and add them to the configuration
+ * 
+ * DOCUMENTATION:
+ * - Full documentation: https://github.com/Leadaxe/singbox-launcher/blob/main/README.md
+ * - Official sing-box documentation: https://sing-box.sagernet.org/configuration/
+ * - Configuration examples: https://deepwiki.com/chika0801/sing-box-examples/
+ * - Parser documentation: see ParserConfig.md
+ * 
+ * IMPORTANT:
+ * - Do NOT commit config.json to Git - it contains your personal settings and secrets!
+ * - Use config.example.json as a template for new installations
+ * - After updating configuration via "Update Config", proxies will be automatically
+ *   added between @ParserSTART and @ParserEND markers
+ * 
+ * CONFIGURATION STRUCTURE:
+ * - @ParcerConfig - subscription parser settings (subscription URLs, filters, groups)
+ * - log - logging settings
+ * - dns - DNS server and rule settings
+ * - inbounds - incoming connections (TUN interface for VPN)
+ * - outbounds - outgoing connections (proxies, direct, blocking)
+ * - route - traffic routing rules
+ * - experimental.clash_api - Clash API settings for proxy management
+ * 
+ * ============================================================================
+ */
+
+{
+/** @ParcerConfig
+
+{
+  "version": 1,
+  "ParserConfig": {
+    "proxies": [{ "source": "https://your-subscription-url-here" }],
+    "outbounds": [
+      {
+        "tag": "proxy-out",
+        "type": "selector",
+        "options": { "interrupt_exist_connections": true },
+        "outbounds": {
+          "proxies": { "tag": "!/(🇷🇺)/i" },
+          "addOutbounds": ["direct-out"],
+          "preferredDefault": { "tag": "/🇳🇱/i" }
+        },
+        "comment": "Proxy group for international connections"
+      },
+      {
+        "tag": "ruvpn",
+        "type": "selector",
+        "options": {},
+        "outbounds": { "proxies": { "tag": "/🇷🇺/i" } },
+        "comment": "Proxy group for Russia"
+      },
+      {
+        "tag": "gemini-vpn",
+        "type": "selector",
+        "options": {},
+        "outbounds": { "proxies": { "comment": "/Gemini/i" } },
+        "comment": "Proxy group for Gemini"
+      }
+    ]
+  }
+}
+*/
+
+  // Documentation:
+  // https://deepwiki.com/chika0801/sing-box-examples/4.3-dns-configuration-and-routing
+  // https://sing-box.sagernet.org/configuration/dns/server/
+  
+  // Downloads:
+  // https://github.com/SagerNet/sing-box/releases/
+  // https://www.wintun.net/
+  
+  
+  // --- LOGGING SETTINGS ---
+  // Defines log detail level, timestamp inclusion, and file output.
+  "log": {
+    // trace debug info warn error fatal panic.
+    "level": "warn",   // Detail level: "info" for daily use, "debug" for detailed debugging.
+                       // Set to "debug" for debugging. After successful setup, "info" is recommended.
+    "timestamp": true  // Add timestamp to each log entry.
+   // "output": "singbox.log" // Output logs to "singbox.log" file in the same folder as the executable.
+  },
+
+  // --- DNS CONFIGURATION ---
+  // Defines how Sing-box will resolve domain names.
+  "dns": {
+    "servers": [
+      // Direct UDP DNS resolver (fast and reliable, but unencrypted).
+      {
+        "type": "udp",
+        "tag": "direct_dns_resolver",
+        "server": "9.9.9.9",      // Example: Quad9 (no filtering). You can use 1.1.1.1, 8.8.8.8, etc.
+        "server_port": 53
+      },
+      // DNS-over-HTTPS (DoH) for privacy (DNS traffic is encrypted over HTTPS).
+      {
+        "type": "https",
+        "tag": "google_doh",
+        "server": "8.8.8.8",      // Example: Google Public DNS.
+        "server_port": 443,
+        "path": "/dns-query",
+        "detour": "proxy-out"
+      },
+      {
+        "type": "https",
+        "tag": "yandex_doh",
+        "server": "77.88.8.88",
+        "server_port": 443,
+        "path": "/dns-query",
+        "detour": "ruvpn",
+        "domain_strategy": "prefer_ipv4"
+      },
+      {
+        "type": "udp",
+        "tag": "yandex_dns_ru_alt",
+        "server": "77.88.8.2",
+        "server_port": 53,
+        "detour": "ruvpn",
+        "domain_strategy": "prefer_ipv4"
+      }
+    ],
+    // Rules for processing DNS queries. Processed from top to bottom.
+    "rules": [
+      // { "rule_set": "ads-rules", "action": "reject" },
+      { "rule_set": "ru-domains", "server": "yandex_doh" },
+      { "rule_set": "ru-domains", "server": "yandex_dns_ru_alt" },
+      { "server": "google_doh" }, // encrypted
+      { "server": "direct_dns_resolver" } // unencrypted
+    ],
+    // All DNS queries are routed through the direct DNS resolver
+    "final": "google_doh",
+    "strategy": "ipv4_only", // Prefer IPv4 addresses when resolving domains.
+    "independent_cache": false // More stable VPN switching speed via API. Enable independent DNS cache for better performance.
+  },
+
+  // --- INCOMING CONNECTIONS (INBOUNDS) ---
+  // Defines how Sing-box accepts incoming connections from applications and the system.
+  "inbounds": [
+    // TUN Interface: for transparent proxying of all system traffic (works as VPN).
+    {
+      "type": "tun",
+      "tag": "tun-in",
+      "interface_name": "singbox-tun0", // Name of the virtual network adapter created by Sing-box.
+      "address": [
+        "172.16.0.1/30"               // Internal IPv4 address for TUN interface.
+                                    // Use a range that does not overlap with your real LAN.
+      ],
+      "mtu": 1492,                    // Maximum transmission unit (standard value for Ethernet).
+      "auto_route": true,             // Automatically add/remove routes to the system routing table.
+      "strict_route": false,           // On Windows: force all traffic through TUN, helps prevent DNS leaks.
+      "stack": "system"                // Use hybrid TCP/IP stack for processing traffic on TUN interface.
+                                      // TCP - internal Sing-box stack, UDP - system stack.
+      // The "platform" object for Windows-specific tun settings, such as http_proxy,
+      // is not directly supported in this context and has been removed.
+      // The "strict_route" parameter is a direct property of the "tun" inbound connection.
+    }
+  ],
+
+  // --- OUTGOING CONNECTIONS (OUTBOUNDS) ---
+  // Defines how Sing-box sends traffic to the external network (through proxy, directly, or blocks).
+  
+  "outbounds": [
+    
+/** @ParserSTART */
+	// Proxies will be automatically added by the parser from subscriptions when clicking "Update Config" button
+	// Format: {"tag":"ProxyName","type":"vless","server":"example.com","server_port":8443,"uuid":"your-uuid-here","flow":"xtls-rprx-vision","tls":{...}}
+/** @ParserEND */
+    
+    // Direct outgoing connection: traffic goes directly, without proxy.
+    { "type": "direct", "tag": "direct-out" }
+    // Outgoing connections "dns" and "block" have been removed, as they are now handled as actions in routing rules.
+  ],
+
+  // --- ROUTING RULES (ROUTE) ---
+  // Defines where to route traffic based on various conditions.
+  // Rules are processed from top to bottom; the first match wins.
+  "route": {
+    "default_domain_resolver": "direct_dns_resolver", // Default DNS server for internal Sing-box needs (if not matched by DNS rules).
+    
+    // --- RULE SET DEFINITIONS ---
+    // Sing-box will automatically load these files on first launch (and will update them).
+    // This is a replacement for outdated GeoIP and Geosite files in .db format for more efficient operation.
+    // External rule-sets (updatable lists)
+    // https://github.com/runetfreedom/russia-v2ray-rules-dat/tree/release/sing-box
+    "rule_set": [
+      { "tag": "ru-domains", "type": "inline", "format": "domain_suffix", "rules": [{"domain_suffix":["ru", "xn--p1ai", "su"]}] },
+      // { "tag": "ads-rules", "type": "remote", "format": "binary", "url": "https://raw.githubusercontent.com/TG-Twilight/AWAvenue-Ads-Rule/main/Filters/AWAvenue-Ads-Rule-Singbox.srs", "download_detour": "direct-out", "update_interval": "24h" },
+      { "tag": "ads-all", "type": "remote", "format": "binary", "url": "https://raw.githubusercontent.com/runetfreedom/russia-v2ray-rules-dat/release/sing-box/rule-set-geosite/geosite-category-ads-all.srs", "download_detour": "direct-out", "update_interval": "24h" },
+      { "tag": "ru-inside", "type": "remote", "format": "binary", "url": "https://raw.githubusercontent.com/runetfreedom/russia-v2ray-rules-dat/release/sing-box/rule-set-geosite/geosite-ru-available-only-inside.srs", "download_detour": "direct-out", "update_interval": "24h" },
+      { "tag": "ru-blocked-main", "type": "remote", "format": "binary", "url": "https://raw.githubusercontent.com/runetfreedom/russia-v2ray-rules-dat/release/sing-box/rule-set-geoip/geoip-ru-blocked.srs", "download_detour": "direct-out", "update_interval": "24h" },
+      { "tag": "ru-blocked-community", "type": "remote", "format": "binary", "url": "https://raw.githubusercontent.com/runetfreedom/russia-v2ray-rules-dat/release/sing-box/rule-set-geoip/geoip-ru-blocked-community.srs", "download_detour": "direct-out", "update_interval": "24h" },
+      { "tag": "israel-sites", "type": "remote", "format": "binary", "url": "https://raw.githubusercontent.com/runetfreedom/russia-v2ray-rules-dat/release/sing-box/rule-set-geoip/geoip-il.srs", "download_detour": "direct-out", "update_interval": "24h" },
+      { "tag": "games", "type": "remote", "format": "binary", "url": "https://raw.githubusercontent.com/runetfreedom/russia-v2ray-rules-dat/release/sing-box/rule-set-geosite/geosite-category-games.srs", "download_detour": "direct-out", "update_interval": "24h" },
+      { "tag": "messengers", "type": "inline", "format": "domain_suffix", "rules": [{ "domain_suffix": ["meet.google.com", "googlevideo.com", "gstatic.com", "googleusercontent.com", "googleapis.com", "web.whatsapp.com", "whatsapp.com", "whatsapp.net", "cdn.whatsapp.net", "mmg.whatsapp.net", "discord.com", "discordapp.com", "cdn.discordapp.com", "discord.gg", "gateway.discord.gg", "discord.media", "telegram.org", "t.me", "cdn-telegram.org"] }, { "process_name": ["Telegram.exe", "Discord.exe", "WhatsApp.exe", "Signal.exe", "Zoom.exe"] }] },
+      { "tag": "gemini", "type": "inline", "format": "domain_suffix", "rules": [{ "domain_suffix": ["generativelanguage.googleapis.com", "gemini.google.com", "ai.google.dev", "palm.googleapis.com"] }] }
+    ],
+
+    "rules": [
+      {
+        "inbound": "tun-in",
+        "action": "resolve",
+        "strategy": "prefer_ipv4" // prefer IPv4 if possible
+      },
+      {
+        "inbound": "tun-in",
+        "action": "sniff", // restore protocols
+        "timeout": "1s"
+      },
+      { "protocol": "dns", "action": "hijack-dns" },
+ 
+      // QUIC does not support UDP traffic proxying. Therefore, we stop HTTP/3
+      // This may block QUIC traffic (used by Google, YouTube, Cloudflare, etc.), which may potentially reduce speed or availability for these services.
+      { "action": "reject", "method": "drop", "network": ["udp"], "port": [443] },
+      // This is useful for accessing local network resources and devices.
+      { "ip_is_private": true, "outbound": "direct-out" },
+      { "domain_suffix": ["local"], "outbound": "direct-out" },
+      // BLOCKING: Block traffic matching ad rules (from loaded rule-set).
+      //    { "rule_set": "ads-rules", "action": "reject", "method": "drop" }, // more targeted
+      //  { "rule_set": "ads-all", "action": "reject", "method": "drop" }, // broader
+      // DIRECT: Route BitTorrent traffic directly.
+      // Many VPN providers block or limit BitTorrent through their servers.
+      { "protocol": ["bittorrent"], "outbound": "direct-out" },
+      // Different tests for different routes
+      { "domain": ["2ip.io"], "outbound": "direct-out" },
+      { "domain": ["2ip.me"], "outbound": "proxy-out" },
+      { "domain": ["2ip.ru"], "outbound": "ruvpn" },
+      // Israel-specific traffic
+      { "rule_set": "israel-sites", "outbound": "proxy-out" },
+      // Russian non-specific traffic
+      { "rule_set": "ru-domains", "outbound": "direct-out" },
+      // Russian-specific traffic
+      { "rule_set": "ru-inside", "outbound": "ruvpn" },
+      // Blocked in Russia
+      { "rule_set": [ "ru-blocked-main", "ru-blocked-community" ], "network": ["tcp", "udp"], "outbound": "proxy-out" },
+      // Games
+      { "rule_set": "games", "network": ["tcp", "udp"], "outbound": "direct-out" },
+      // Gemini AI
+      { "rule_set": "gemini", "network": ["tcp", "udp"], "outbound": "gemini-vpn" },
+      // 🎮 Gaming ports (Steam, Dota, Valorant, Fortnite, Battle.net) — route directly without proxy
+      { "port": [
+          3659,                          // 🎮 EA Online / FIFA
+          1935,                          // 🎮 Twitch/YouTube live ingest (game streaming)
+          5001,                          // 🎮 Call of Duty / Blizzard voice
+          5795, 5796,                    // 🎮 Epic/Fortnite
+          7000,                          // 🎮 PUBG / UE4
+          7777,                          // 🎮 Minecraft / ARK / Terraria
+          9000,                          // 🎮 Custom game ports
+          10039, 10040                   // 🎮 Riot / Valorant
+        ],
+        "port_range": "27000:27100", // 🎮 Steam/Dota/CS:GO/Source
+        "network": ["tcp", "udp"], "outbound": "direct-out" 
+      },
+      
+      { "rule_set": "messengers", "network": ["tcp", "udp"], "outbound": "proxy-out" }, // All messengers through proxy
+      // { "network": ["udp"], "outbound": "direct-out"}, // UDP directly
+      // { "network": ["udp"], "outbound": "proxy-out"}, // UDP through proxy
+      
+      // 🎯 Steam/Valve IP networks — exclude from VPN to avoid slowdowns and packet loss
+      { "ip_cidr": ["162.254.192.0/18", "208.64.200.0/22", "205.196.6.0/24", "208.64.204.0/22", "146.66.152.0/24"], "outbound": "direct-out" }
+      
+    ], 
+    // PROXY (default): All traffic that didn't match previous rules should be routed through the "Proxy" selector.
+    // This is the final rule that sends all remaining traffic (mainly TCP) through the selected VLESS server.
+    "final": "proxy-out",
+    "auto_detect_interface": true // Otherwise, traffic won't exit TUN and there will be loops
+  },
+  
+  "experimental": {
+    "clash_api": {
+      "external_controller": "127.0.0.1:9090",
+      "secret": "CHANGE_THIS_TO_YOUR_SECRET_TOKEN" 
+    }
+  }
+}

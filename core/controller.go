@@ -100,8 +100,8 @@ type AppController struct {
 	UpdateTrayMenuFunc   func() // Callback для обновления меню трея
 
 	// --- Parser progress UI ---
-	ParserProgressBar *widget.ProgressBar
-	ParserStatusLabel *widget.Label
+	ParserProgressBar        *widget.ProgressBar
+	ParserStatusLabel        *widget.Label
 	UpdateParserProgressFunc func(progress float64, status string) // Callback для обновления прогресса парсера
 }
 
@@ -229,7 +229,9 @@ func NewAppController(appIconData, greyIconData, greenIconData, redIconData []by
 	ac.ResetAPIStateFunc = func() { log.Println("ResetAPIStateFunc handler is not set yet.") }
 	ac.UpdateCoreStatusFunc = func() { log.Println("UpdateCoreStatusFunc handler is not set yet.") }
 	ac.UpdateTrayMenuFunc = func() { log.Println("UpdateTrayMenuFunc handler is not set yet.") }
-	ac.UpdateParserProgressFunc = func(progress float64, status string) { log.Printf("UpdateParserProgressFunc handler is not set yet. Progress: %.0f%%, Status: %s", progress, status) }
+	ac.UpdateParserProgressFunc = func(progress float64, status string) {
+		log.Printf("UpdateParserProgressFunc handler is not set yet. Progress: %.0f%%, Status: %s", progress, status)
+	}
 
 	return ac, nil
 }
