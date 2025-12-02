@@ -24,7 +24,6 @@ func CreateClashAPITab(ac *core.AppController) fyne.CanvasObject {
 	selectorOptions, defaultSelector, err := core.GetSelectorGroupsFromConfig(ac.ConfigPath)
 	if err != nil {
 		log.Printf("clash_api_tab: failed to get selector groups: %v", err)
-		ShowError(ac.MainWindow, err)
 	}
 	if len(selectorOptions) == 0 {
 		selectorOptions = []string{"proxy-out"}
@@ -289,4 +288,3 @@ func CreateClashAPITab(ac *core.AppController) fyne.CanvasObject {
 
 	return contentContainer
 }
-

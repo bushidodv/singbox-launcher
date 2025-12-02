@@ -118,8 +118,6 @@ func CreateDiagnosticsTab(ac *core.AppController) fyne.CanvasObject {
 	}
 
 	return container.NewVBox(
-		widget.NewLabel("Diagnostics"),
-		widget.NewSeparator(),
 		widget.NewLabel("IP Check Services:"),
 		stunButton, // Google STUN [UDP] перенесен в секцию IP Check Services
 		openBrowserButton("2ip.ru", "https://2ip.ru"),
@@ -130,4 +128,3 @@ func CreateDiagnosticsTab(ac *core.AppController) fyne.CanvasObject {
 		openBrowserButton("WhatIsMyIPAddress", "https://whatismyipaddress.com"),
 	)
 }
-

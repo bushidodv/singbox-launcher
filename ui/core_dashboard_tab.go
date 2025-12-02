@@ -3,8 +3,6 @@ package ui
 import (
 	"fmt"
 	"math/rand"
-	"os/exec"
-	"path/filepath"
 	"runtime"
 	"time"
 
@@ -21,12 +19,10 @@ type CoreDashboardTab struct {
 
 	// UI элементы
 	statusLabel             *widget.Label // Полный статус: "Core Status" + иконка + текст
-	versionLabel            *widget.Label
-	versionButton           *widget.Button // Кликабельная версия (только Windows)
+	singboxStatusLabel      *widget.Label // Статус sing-box (версия или "not found")
 	downloadButton          *widget.Button
 	downloadProgress        *widget.ProgressBar // Прогресс-бар для скачивания
 	downloadContainer       fyne.CanvasObject   // Контейнер для кнопки/прогресс-бара
-	errorLabel              *widget.Label       // Для отображения ошибок под версией
 	startButton             *widget.Button      // Кнопка Start
 	stopButton              *widget.Button      // Кнопка Stop
 	wintunStatusLabel       *widget.Label       // Статус wintun.dll
@@ -36,7 +32,6 @@ type CoreDashboardTab struct {
 
 	// Данные
 	stopAutoUpdate           chan bool
-	fullBinaryPath           string
 	lastUpdateSuccess        bool // Отслеживаем успех последнего обновления версии
 	downloadInProgress       bool // Флаг процесса скачивания sing-box
 	wintunDownloadInProgress bool // Флаг процесса скачивания wintun.dll
@@ -139,24 +134,16 @@ func (tab *CoreDashboardTab) createStatusRow() fyne.CanvasObject {
 	)
 }
 
-// createVersionBlock создает блок с версией
+// createVersionBlock создает блок с версией (по аналогии с wintun)
 func (tab *CoreDashboardTab) createVersionBlock() fyne.CanvasObject {
 	versionTitle := widget.NewLabel("Sing-box Ver.")
 	versionTitle.Importance = widget.MediumImportance
 
-	tab.versionLabel = widget.NewLabel("Loading version...")
-	tab.versionLabel.Wrapping = fyne.TextWrapOff
+	// Статус sing-box (версия или "not found") - по аналогии с wintunStatusLabel
+	tab.singboxStatusLabel = widget.NewLabel("Checking...")
+	tab.singboxStatusLabel.Wrapping = fyne.TextWrapOff
 
-	// На Windows делаем версию кликабельной для открытия проводника
-	if runtime.GOOS == "windows" {
-		tab.versionButton = widget.NewButton("Loading version...", func() {
-			tab.openBinaryInExplorer()
-		})
-		tab.versionButton.Importance = widget.LowImportance
-		tab.versionButton.Hide() // Скрываем по умолчанию, покажем когда будет версия
-	}
-
-	// Кнопка Download/Update справа от версии
+	// Кнопка Download/Update справа от статуса
 	tab.downloadButton = widget.NewButton("Download", func() {
 		tab.handleDownload()
 	})
@@ -169,38 +156,18 @@ func (tab *CoreDashboardTab) createVersionBlock() fyne.CanvasObject {
 	tab.downloadProgress.SetValue(0)
 
 	// Контейнер для кнопки/прогресс-бара - они занимают одно место, переключаются через Show/Hide
-	// Используем Stack с Max для прогресс-бара, чтобы он мог расширяться и был достаточно большим
-	// Структура такая же, как у wintun
+	// Структура точно такая же, как у wintun
 	progressContainer := container.NewMax(tab.downloadProgress)
 	tab.downloadContainer = container.NewStack(tab.downloadButton, progressContainer)
 
-	// Объединяем версию и контейнер с кнопкой/прогресс-баром в одну строку
-	var versionDisplay fyne.CanvasObject
-	if runtime.GOOS == "windows" && tab.versionButton != nil {
-		// На Windows используем кликабельную кнопку
-		versionDisplay = tab.versionButton
-	} else {
-		// На других платформах просто label
-		versionDisplay = tab.versionLabel
-	}
-
-	// Используем HBox как у wintun, чтобы прогресс-бар был такого же размера
-	// Версия слева, контейнер с кнопкой/прогресс-баром справа
-	// Структура точно такая же, как у wintun
-	versionInfoContainer := container.NewHBox(
-		versionDisplay,
+	// Объединяем статус и кнопку в одну строку с фиксированной шириной для правой части
+	singboxInfoContainer := container.NewGridWithColumns(2,
+		tab.singboxStatusLabel,
 		tab.downloadContainer,
 	)
 
-	// Label для ошибок (скрыт по умолчанию)
-	tab.errorLabel = widget.NewLabel("")
-	tab.errorLabel.Wrapping = fyne.TextWrapWord
-	tab.errorLabel.Importance = widget.DangerImportance
-	tab.errorLabel.Hide()
-
 	return container.NewVBox(
-		container.NewHBox(versionTitle, versionInfoContainer),
-		tab.errorLabel,
+		container.NewHBox(versionTitle, singboxInfoContainer),
 	)
 }
 
@@ -260,24 +227,14 @@ func (tab *CoreDashboardTab) updateRunningStatus() {
 	}
 }
 
-// updateVersionInfo обновляет информацию о версии, возвращает ошибку если есть
+// updateVersionInfo обновляет информацию о версии (по аналогии с updateWintunStatus)
 func (tab *CoreDashboardTab) updateVersionInfo() error {
-	// Получаем полный путь для открытия в проводнике
-	tab.fullBinaryPath = tab.controller.SingboxPath
-
 	// Получаем установленную версию
 	installedVersion, err := tab.controller.GetInstalledCoreVersion()
 	if err != nil {
-		// Версия не отображается, если ошибка
-		if runtime.GOOS == "windows" && tab.versionButton != nil {
-			tab.versionButton.Hide()
-		}
-		tab.versionLabel.SetText(" — ")
-		tab.versionLabel.Importance = widget.MediumImportance
-		tab.versionLabel.Show()
-		// Показываем ошибку снизу
-		tab.errorLabel.SetText(fmt.Sprintf("Error: %s", err.Error()))
-		tab.errorLabel.Show()
+		// Показываем ошибку в статусе (по аналогии с wintun)
+		tab.singboxStatusLabel.SetText("❌ sing-box.exe not found")
+		tab.singboxStatusLabel.Importance = widget.MediumImportance
 		// Если бинарника нет - кнопка должна называться "Download"
 		// Пытаемся получить последнюю версию для кнопки
 		latest, latestErr := tab.controller.GetLatestCoreVersion()
@@ -292,25 +249,12 @@ func (tab *CoreDashboardTab) updateVersionInfo() error {
 		return err
 	}
 
-	// Скрываем ошибку, если бинарник найден
-	tab.errorLabel.Hide()
-
 	// Получаем информацию о версиях
 	versionInfo := tab.controller.GetCoreVersionInfo()
 
-	// Обновляем отображение версии
-	if runtime.GOOS == "windows" && tab.versionButton != nil {
-		// На Windows используем кликабельную кнопку
-		tab.versionButton.SetText(installedVersion)
-		tab.versionButton.Importance = widget.LowImportance
-		tab.versionButton.Show()
-		tab.versionLabel.Hide()
-	} else {
-		// На других платформах просто label
-		tab.versionLabel.SetText(installedVersion)
-		tab.versionLabel.Importance = widget.SuccessImportance
-		tab.versionLabel.Show()
-	}
+	// Показываем версию (по аналогии с wintun - просто текст)
+	tab.singboxStatusLabel.SetText(installedVersion)
+	tab.singboxStatusLabel.Importance = widget.MediumImportance
 
 	// Обновляем кнопку - показываем только если есть обновление
 	if versionInfo.LatestVersion != "" && versionInfo.UpdateAvailable {
@@ -397,31 +341,6 @@ func (tab *CoreDashboardTab) handleDownload() {
 	}()
 }
 
-// openBinaryInExplorer открывает проводник и выделяет файл бинарника
-func (tab *CoreDashboardTab) openBinaryInExplorer() {
-	if tab.fullBinaryPath == "" {
-		return
-	}
-
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		// Windows: explorer /select,"путь\к\файлу"
-		cmd = exec.Command("explorer.exe", "/select,", tab.fullBinaryPath)
-	} else if runtime.GOOS == "darwin" {
-		// macOS: open -R "путь/к/файлу"
-		cmd = exec.Command("open", "-R", tab.fullBinaryPath)
-	} else {
-		// Linux: xdg-open с директорией файла
-		dir := filepath.Dir(tab.fullBinaryPath)
-		cmd = exec.Command("xdg-open", dir)
-	}
-
-	if err := cmd.Run(); err != nil {
-		// Логируем ошибку, но не показываем пользователю
-		fmt.Printf("Failed to open explorer: %v\n", err)
-	}
-}
-
 // startAutoUpdate запускает автообновление версии (статус управляется через RunningState)
 func (tab *CoreDashboardTab) startAutoUpdate() {
 	// Запускаем периодическое обновление с умной логикой
@@ -484,8 +403,8 @@ func (tab *CoreDashboardTab) createWintunBlock() fyne.CanvasObject {
 	progressContainer := container.NewMax(tab.wintunDownloadProgress)
 	tab.wintunDownloadContainer = container.NewStack(tab.wintunDownloadButton, progressContainer)
 
-	// Объединяем статус и кнопку в одну строку
-	wintunInfoContainer := container.NewHBox(
+	// Объединяем статус и кнопку в одну строку с фиксированной шириной для правой части
+	wintunInfoContainer := container.NewGridWithColumns(2,
 		tab.wintunStatusLabel,
 		tab.wintunDownloadContainer,
 	)

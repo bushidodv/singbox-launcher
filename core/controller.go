@@ -704,13 +704,13 @@ func CheckConfigFileExists(ac *AppController) {
 		examplePath := filepath.Join(platform.GetBinDir(ac.ExecDir), constants.ConfigExampleName)
 
 		message := fmt.Sprintf(
-			"⚠️ Файл конфигурации не найден!\n\n"+
-				"Файл %s отсутствует в папке bin/.\n\n"+
-				"Для начала работы:\n"+
-				"1. Скопируйте файл %s в %s\n"+
-				"2. Откройте %s и заполните его своими настройками\n"+
-				"3. Перезапустите приложение\n\n"+
-				"Пример конфигурации находится здесь:\n%s",
+			"⚠️ Configuration file not found!\n\n"+
+				"The file %s is missing from the bin/ folder.\n\n"+
+				"To get started:\n"+
+				"1. Copy the file %s to %s\n"+
+				"2. Open %s and fill it with your settings\n"+
+				"3. Restart the application\n\n"+
+				"Example configuration is located here:\n%s",
 			constants.ConfigFileName,
 			constants.ConfigExampleName,
 			constants.ConfigFileName,
@@ -719,7 +719,7 @@ func CheckConfigFileExists(ac *AppController) {
 		)
 
 		fyne.Do(func() {
-			dialog.ShowInformation("Конфигурация не найдена", message, ac.MainWindow)
+			dialog.ShowInformation("Configuration Not Found", message, ac.MainWindow)
 		})
 	}
 }
@@ -746,8 +746,8 @@ func CheckIfLauncherAlreadyRunningUtil(ac *AppController) {
 		if strings.EqualFold(p.Executable(), execName) {
 			fyne.Do(func() {
 				dialog.ShowInformation(
-					"Информация",
-					"Приложение уже запущено. Используйте существующий экземпляр или закройте его перед запуском нового.",
+					"Information",
+					"The application is already running. Use the existing instance or close it before starting a new one.",
 					ac.MainWindow,
 				)
 			})
