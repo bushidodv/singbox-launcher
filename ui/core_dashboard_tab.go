@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"image/color"
 	"io"
 	"math/rand"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/layout"
@@ -21,26 +23,30 @@ import (
 	"singbox-launcher/core"
 )
 
+const downloadPlaceholderWidth = 180
+
 // CoreDashboardTab управляет вкладкой Core Dashboard
 type CoreDashboardTab struct {
 	controller *core.AppController
 
 	// UI elements
-	statusLabel             *widget.Label // Full status: "Core Status" + icon + text
-	singboxStatusLabel      *widget.Label // sing-box status (version or "not found")
-	downloadButton          *widget.Button
-	downloadProgress        *widget.ProgressBar // Progress bar for download
-	downloadContainer       fyne.CanvasObject   // Container for button/progress bar
-	startButton             *widget.Button      // Start button
-	stopButton              *widget.Button      // Stop button
-	wintunStatusLabel       *widget.Label       // wintun.dll status
-	wintunDownloadButton    *widget.Button      // wintun.dll download button
-	wintunDownloadProgress  *widget.ProgressBar // Progress bar for wintun.dll download
-	wintunDownloadContainer fyne.CanvasObject   // Container for wintun button/progress bar
-	configStatusLabel       *widget.Label
-	templateDownloadButton  *widget.Button
-	wizardButton            *widget.Button
-	updateConfigButton      *widget.Button
+	statusLabel               *widget.Label // Full status: "Core Status" + icon + text
+	singboxStatusLabel        *widget.Label // sing-box status (version or "not found")
+	downloadButton            *widget.Button
+	downloadProgress          *widget.ProgressBar // Progress bar for download
+	downloadContainer         fyne.CanvasObject   // Container for button/progress bar
+	downloadPlaceholder       *canvas.Rectangle   // keeps width when button hidden
+	startButton               *widget.Button      // Start button
+	stopButton                *widget.Button      // Stop button
+	wintunStatusLabel         *widget.Label       // wintun.dll status
+	wintunDownloadButton      *widget.Button      // wintun.dll download button
+	wintunDownloadProgress    *widget.ProgressBar // Progress bar for wintun.dll download
+	wintunDownloadContainer   fyne.CanvasObject   // Container for wintun button/progress bar
+	wintunDownloadPlaceholder *canvas.Rectangle   // keeps width when button hidden
+	configStatusLabel         *widget.Label
+	templateDownloadButton    *widget.Button
+	wizardButton              *widget.Button
+	updateConfigButton        *widget.Button
 
 	// Data
 	stopAutoUpdate           chan bool
@@ -230,8 +236,19 @@ func (tab *CoreDashboardTab) createVersionBlock() fyne.CanvasObject {
 	tab.downloadProgress = widget.NewProgressBar()
 	tab.downloadProgress.Hide()
 	tab.downloadProgress.SetValue(0)
-	progressContainer := container.NewMax(tab.downloadProgress)
-	tab.downloadContainer = container.NewStack(tab.downloadButton, progressContainer)
+
+	if tab.downloadPlaceholder == nil {
+		tab.downloadPlaceholder = canvas.NewRectangle(color.Transparent)
+	}
+	placeholderSize := fyne.NewSize(downloadPlaceholderWidth, tab.downloadButton.MinSize().Height)
+	tab.downloadPlaceholder.SetMinSize(placeholderSize)
+	tab.downloadPlaceholder.Hide()
+
+	tab.downloadContainer = container.NewStack(
+		tab.downloadPlaceholder,
+		tab.downloadButton,
+		tab.downloadProgress,
+	)
 
 	return container.NewHBox(
 		title,
@@ -239,6 +256,104 @@ func (tab *CoreDashboardTab) createVersionBlock() fyne.CanvasObject {
 		tab.singboxStatusLabel,
 		tab.downloadContainer,
 	)
+}
+
+// setWintunState - управляет состоянием wintun (лейбл, кнопка, прогресс)
+// statusText: текст для статус-лейбла (если "", не менять)
+// buttonText: текст кнопки (если "", скрыть кнопку; иначе показать с этим текстом и включить)
+// progress: значение прогресса (если < 0, скрыть прогресс; иначе показать с этим значением 0.0-1.0)
+func (tab *CoreDashboardTab) setWintunState(statusText string, buttonText string, progress float64) {
+	// Управление статус-лейблом
+	if statusText != "" {
+		tab.wintunStatusLabel.SetText(statusText)
+	}
+
+	// Управление прогресс-баром
+	progressVisible := false
+	if progress < 0 {
+		// Скрыть прогресс
+		tab.wintunDownloadProgress.Hide()
+		tab.wintunDownloadProgress.SetValue(0)
+	} else {
+		// Показать прогресс с значением
+		tab.wintunDownloadProgress.SetValue(progress)
+		tab.wintunDownloadProgress.Show()
+		progressVisible = true
+	}
+
+	// Управление кнопкой (если прогресс виден, кнопка всегда скрыта)
+	buttonVisible := false
+	if progressVisible {
+		// Если показываем прогресс, кнопка всегда скрыта
+		tab.wintunDownloadButton.Hide()
+	} else if buttonText == "" {
+		// Скрыть кнопку
+		tab.wintunDownloadButton.Hide()
+	} else {
+		// Показать кнопку с текстом
+		tab.wintunDownloadButton.SetText(buttonText)
+		tab.wintunDownloadButton.Show()
+		tab.wintunDownloadButton.Enable()
+		buttonVisible = true
+	}
+
+	// Управление placeholder: показывать если есть кнопка ИЛИ прогресс-бар
+	if tab.wintunDownloadPlaceholder != nil {
+		if buttonVisible || progressVisible {
+			tab.wintunDownloadPlaceholder.Show()
+		} else {
+			tab.wintunDownloadPlaceholder.Hide()
+		}
+	}
+}
+
+// setSingboxState - управляет состоянием sing-box (лейбл, кнопка, прогресс)
+// statusText: текст для статус-лейбла (если "", не менять)
+// buttonText: текст кнопки (если "", скрыть кнопку; иначе показать с этим текстом и включить)
+// progress: значение прогресса (если < 0, скрыть прогресс; иначе показать с этим значением 0.0-1.0)
+func (tab *CoreDashboardTab) setSingboxState(statusText string, buttonText string, progress float64) {
+	// Управление статус-лейблом
+	if statusText != "" {
+		tab.singboxStatusLabel.SetText(statusText)
+	}
+
+	// Управление прогресс-баром
+	progressVisible := false
+	if progress < 0 {
+		// Скрыть прогресс
+		tab.downloadProgress.Hide()
+		tab.downloadProgress.SetValue(0)
+	} else {
+		// Показать прогресс с значением
+		tab.downloadProgress.SetValue(progress)
+		tab.downloadProgress.Show()
+		progressVisible = true
+	}
+
+	// Управление кнопкой (если прогресс виден, кнопка всегда скрыта)
+	buttonVisible := false
+	if progressVisible {
+		// Если показываем прогресс, кнопка всегда скрыта
+		tab.downloadButton.Hide()
+	} else if buttonText == "" {
+		// Скрыть кнопку
+		tab.downloadButton.Hide()
+	} else {
+		// Показать кнопку с текстом
+		tab.downloadButton.SetText(buttonText)
+		tab.downloadButton.Show()
+		tab.downloadButton.Enable()
+		buttonVisible = true
+	}
+
+	// Управление placeholder: показывать если есть кнопка ИЛИ прогресс-бар
+	if tab.downloadPlaceholder != nil {
+		if buttonVisible || progressVisible {
+			tab.downloadPlaceholder.Show()
+		} else {
+			tab.downloadPlaceholder.Hide()
+		}
+	}
 }
 
 // updateBinaryStatus проверяет наличие бинарника и обновляет статус
@@ -375,16 +490,13 @@ func (tab *CoreDashboardTab) updateVersionInfoAsync() {
 		fyne.Do(func() {
 			if err != nil {
 				// Показываем ошибку в статусе
-				tab.singboxStatusLabel.SetText("❌ sing-box.exe not found")
 				tab.singboxStatusLabel.Importance = widget.MediumImportance
-				tab.downloadButton.SetText("Download")
-				tab.downloadButton.Enable()
 				tab.downloadButton.Importance = widget.HighImportance
-				tab.downloadButton.Show()
+				tab.setSingboxState("❌ sing-box.exe not found", "Download", -1)
 			} else {
 				// Показываем версию
-				tab.singboxStatusLabel.SetText(installedVersion)
 				tab.singboxStatusLabel.Importance = widget.MediumImportance
+				tab.setSingboxState(installedVersion, "", -1)
 			}
 		})
 
@@ -392,11 +504,11 @@ func (tab *CoreDashboardTab) updateVersionInfoAsync() {
 		if err != nil {
 			latest, latestErr := tab.controller.GetLatestCoreVersion()
 			fyne.Do(func() {
+				buttonText := "Download"
 				if latestErr == nil && latest != "" {
-					tab.downloadButton.SetText(fmt.Sprintf("Download v%s", latest))
-				} else {
-					tab.downloadButton.SetText("Download")
+					buttonText = fmt.Sprintf("Download v%s", latest)
 				}
+				tab.setSingboxState("", buttonText, -1)
 			})
 			return
 		}
@@ -409,20 +521,18 @@ func (tab *CoreDashboardTab) updateVersionInfoAsync() {
 			if latestErr != nil {
 				// Network error - not critical, just don't show update
 				// Log for debugging, but don't show to user
-				tab.downloadButton.Hide()
+				tab.setSingboxState("", "", -1)
 				return
 			}
 
 			// Сравниваем версии
 			if latest != "" && compareVersions(installedVersion, latest) < 0 {
 				// Есть обновление
-				tab.downloadButton.SetText(fmt.Sprintf("Update v%s", latest))
-				tab.downloadButton.Enable()
 				tab.downloadButton.Importance = widget.HighImportance
-				tab.downloadButton.Show()
+				tab.setSingboxState("", fmt.Sprintf("Update v%s", latest), -1)
 			} else {
 				// Версия актуальна
-				tab.downloadButton.Hide()
+				tab.setSingboxState("", "", -1)
 			}
 		})
 	}()
@@ -544,8 +654,7 @@ func (tab *CoreDashboardTab) handleDownload() {
 				if err != nil {
 					ShowError(tab.controller.MainWindow, fmt.Errorf("failed to get latest version: %w", err))
 					tab.downloadInProgress = false
-					tab.downloadButton.Enable()
-					tab.downloadButton.Show()
+					tab.setSingboxState("", "Download", -1)
 					return
 				}
 				// Запускаем скачивание с полученной версией
@@ -564,10 +673,7 @@ func (tab *CoreDashboardTab) startDownloadWithVersion(targetVersion string) {
 	// Запускаем скачивание в отдельной горутине
 	tab.downloadInProgress = true
 	tab.downloadButton.Disable()
-	// Скрываем кнопку и показываем прогресс-бар
-	tab.downloadButton.Hide()
-	tab.downloadProgress.Show()
-	tab.downloadProgress.SetValue(0)
+	tab.setSingboxState("", "", 0.0)
 
 	// Создаем канал для прогресса
 	progressChan := make(chan core.DownloadProgress, 10)
@@ -583,16 +689,12 @@ func (tab *CoreDashboardTab) startDownloadWithVersion(targetVersion string) {
 	go func() {
 		for progress := range progressChan {
 			fyne.Do(func() {
-				// Обновляем только прогресс-бар (кнопка скрыта)
-				tab.downloadProgress.SetValue(float64(progress.Progress) / 100.0)
+				// Обновляем прогресс-бар
+				progressValue := float64(progress.Progress) / 100.0
+				tab.setSingboxState("", "", progressValue)
 
 				if progress.Status == "done" {
 					tab.downloadInProgress = false
-					// Скрываем прогресс-бар и показываем кнопку
-					tab.downloadProgress.Hide()
-					tab.downloadProgress.SetValue(0)
-					tab.downloadButton.Show()
-					tab.downloadButton.Enable()
 					// Обновляем статусы после успешного скачивания (это уберет ошибки и обновит статус)
 					tab.updateVersionInfo()
 					tab.updateBinaryStatus() // Это вызовет updateRunningStatus() и обновит статус
@@ -601,11 +703,7 @@ func (tab *CoreDashboardTab) startDownloadWithVersion(targetVersion string) {
 					ShowInfo(tab.controller.MainWindow, "Download Complete", progress.Message)
 				} else if progress.Status == "error" {
 					tab.downloadInProgress = false
-					// Скрываем прогресс-бар и показываем кнопку
-					tab.downloadProgress.Hide()
-					tab.downloadProgress.SetValue(0)
-					tab.downloadButton.Show()
-					tab.downloadButton.Enable()
+					tab.setSingboxState("", "Download", -1)
 					ShowError(tab.controller.MainWindow, progress.Error)
 				}
 			})
@@ -671,8 +769,19 @@ func (tab *CoreDashboardTab) createWintunBlock() fyne.CanvasObject {
 	tab.wintunDownloadProgress = widget.NewProgressBar()
 	tab.wintunDownloadProgress.Hide()
 	tab.wintunDownloadProgress.SetValue(0)
-	progressContainer := container.NewMax(tab.wintunDownloadProgress)
-	tab.wintunDownloadContainer = container.NewStack(tab.wintunDownloadButton, progressContainer)
+
+	if tab.wintunDownloadPlaceholder == nil {
+		tab.wintunDownloadPlaceholder = canvas.NewRectangle(color.Transparent)
+	}
+	wintunPlaceholderSize := fyne.NewSize(downloadPlaceholderWidth, tab.wintunDownloadButton.MinSize().Height)
+	tab.wintunDownloadPlaceholder.SetMinSize(wintunPlaceholderSize)
+	tab.wintunDownloadPlaceholder.Hide()
+
+	tab.wintunDownloadContainer = container.NewStack(
+		tab.wintunDownloadPlaceholder,
+		tab.wintunDownloadButton,
+		tab.wintunDownloadProgress,
+	)
 
 	return container.NewHBox(
 		title,
@@ -690,24 +799,18 @@ func (tab *CoreDashboardTab) updateWintunStatus() {
 
 	exists, err := tab.controller.CheckWintunDLL()
 	if err != nil {
-		tab.wintunStatusLabel.SetText("❌ Error checking wintun.dll")
 		tab.wintunStatusLabel.Importance = widget.MediumImportance
-		tab.wintunDownloadButton.Disable()
+		tab.setWintunState("❌ Error checking wintun.dll", "", -1)
 		return
 	}
 
 	if exists {
-		tab.wintunStatusLabel.SetText("ok")
 		tab.wintunStatusLabel.Importance = widget.MediumImportance
-		tab.wintunDownloadButton.Hide()
-		tab.wintunDownloadProgress.Hide()
+		tab.setWintunState("ok", "", -1)
 	} else {
-		tab.wintunStatusLabel.SetText("❌ wintun.dll not found")
 		tab.wintunStatusLabel.Importance = widget.MediumImportance
-		tab.wintunDownloadButton.Show()
-		tab.wintunDownloadButton.Enable()
-		tab.wintunDownloadButton.SetText("Download wintun.dll")
 		tab.wintunDownloadButton.Importance = widget.HighImportance
+		tab.setWintunState("❌ wintun.dll not found", "Download wintun.dll", -1)
 	}
 
 	// Обновляем статус кнопок Start/Stop, так как они зависят от наличия wintun.dll
@@ -722,9 +825,7 @@ func (tab *CoreDashboardTab) handleWintunDownload() {
 
 	tab.wintunDownloadInProgress = true
 	tab.wintunDownloadButton.Disable()
-	tab.wintunDownloadButton.SetText("Downloading...")
-	tab.wintunDownloadProgress.Show()
-	tab.wintunDownloadProgress.SetValue(0)
+	tab.setWintunState("", "", 0.0)
 
 	go func() {
 		progressChan := make(chan core.DownloadProgress, 10)
@@ -737,22 +838,16 @@ func (tab *CoreDashboardTab) handleWintunDownload() {
 
 		for progress := range progressChan {
 			fyne.Do(func() {
-				tab.wintunDownloadProgress.SetValue(float64(progress.Progress) / 100.0)
-				tab.wintunDownloadButton.SetText(fmt.Sprintf("Downloading... %d%%", progress.Progress))
+				progressValue := float64(progress.Progress) / 100.0
+				tab.setWintunState("", "", progressValue)
 
 				if progress.Status == "done" {
 					tab.wintunDownloadInProgress = false
-					tab.updateWintunStatus() // Обновляем статус после скачивания
-					tab.wintunDownloadProgress.Hide()
-					tab.wintunDownloadProgress.SetValue(0)
-					tab.wintunDownloadButton.Enable()
+					tab.updateWintunStatus() // Обновляет статус и управляет кнопкой
 					ShowInfo(tab.controller.MainWindow, "Download Complete", progress.Message)
 				} else if progress.Status == "error" {
 					tab.wintunDownloadInProgress = false
-					tab.wintunDownloadProgress.Hide()
-					tab.wintunDownloadProgress.SetValue(0)
-					tab.wintunDownloadButton.Show()
-					tab.wintunDownloadButton.Enable()
+					tab.setWintunState("", "Download wintun.dll", -1)
 					ShowError(tab.controller.MainWindow, progress.Error)
 				}
 			})
