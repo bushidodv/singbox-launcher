@@ -36,6 +36,7 @@ type WizardState struct {
 	OutboundsPreviewText string // Храним текст для read-only режима
 	CheckURLButton       *widget.Button
 	ParseButton          *widget.Button
+	parserConfigUpdating bool
 
 	// Parsed data
 	ParserConfig       *core.ParserConfig
@@ -50,6 +51,8 @@ type WizardState struct {
 	templatePreviewUpdating   bool
 	FinalOutboundSelect       *widget.Select
 	SelectedFinalOutbound     string
+	previewNeedsParse         bool
+	autoParseInProgress       bool
 }
 
 type SelectableRuleState struct {
@@ -68,7 +71,8 @@ const (
 // ShowConfigWizard открывает окно мастера конфигурации
 func ShowConfigWizard(parent fyne.Window, controller *core.AppController) {
 	state := &WizardState{
-		Controller: controller,
+		Controller:        controller,
+		previewNeedsParse: true,
 	}
 
 	// Создаем новое окно для мастера
@@ -97,7 +101,10 @@ func ShowConfigWizard(parent fyne.Window, controller *core.AppController) {
 	if !loadedConfig {
 		if state.TemplateData != nil && state.TemplateData.ParserConfig != "" {
 			if state.ParserConfigEntry != nil {
+				state.parserConfigUpdating = true
 				state.ParserConfigEntry.SetText(state.TemplateData.ParserConfig)
+				state.parserConfigUpdating = false
+				state.previewNeedsParse = true
 			}
 		} else {
 			// Нет конфига и нет шаблона - показываем ошибку и закрываем визард
@@ -114,8 +121,19 @@ func ShowConfigWizard(parent fyne.Window, controller *core.AppController) {
 	tabs := container.NewAppTabs(
 		container.NewTabItem("VLESS Sources & ParserConfig", tab1),
 	)
+	var previewTabItem *container.TabItem
 	if templateTab := createTemplateTab(state); templateTab != nil {
-		tabs.Append(container.NewTabItem("Rules & Templates", templateTab))
+		rulesTab := container.NewTabItem("Rules", templateTab)
+		previewTabItem = container.NewTabItem("Preview", createPreviewTab(state))
+		tabs.Append(rulesTab)
+		tabs.Append(previewTabItem)
+	}
+	if previewTabItem != nil {
+		tabs.OnChanged = func(item *container.TabItem) {
+			if item == previewTabItem {
+				state.triggerParseForPreview()
+			}
+		}
 	}
 
 	// Обновляем предпросмотр после создания всех вкладок
@@ -153,6 +171,10 @@ func createVLESSSourceTab(state *WizardState) fyne.CanvasObject {
 	state.VLESSURLEntry = widget.NewEntry()
 	state.VLESSURLEntry.SetPlaceHolder("https://example.com/subscription")
 	state.VLESSURLEntry.Wrapping = fyne.TextWrapOff
+	state.VLESSURLEntry.OnChanged = func(value string) {
+		state.previewNeedsParse = true
+		state.applyURLToParserConfig(strings.TrimSpace(value))
+	}
 
 	state.CheckURLButton = widget.NewButton("Check URL", func() {
 		go checkURL(state)
@@ -178,6 +200,10 @@ func createVLESSSourceTab(state *WizardState) fyne.CanvasObject {
 	state.ParserConfigEntry.SetPlaceHolder("Enter ParserConfig JSON here...")
 	state.ParserConfigEntry.Wrapping = fyne.TextWrapOff
 	state.ParserConfigEntry.OnChanged = func(string) {
+		if state.parserConfigUpdating {
+			return
+		}
+		state.previewNeedsParse = true
 		state.updateTemplatePreview()
 		state.refreshOutboundOptions()
 	}
@@ -205,6 +231,11 @@ func createVLESSSourceTab(state *WizardState) fyne.CanvasObject {
 
 	// Кнопка Parse (располагается слева от ParserConfig)
 	state.ParseButton = widget.NewButton("Parse", func() {
+		if state.autoParseInProgress {
+			return
+		}
+		state.autoParseInProgress = true
+		state.previewNeedsParse = true
 		go parseAndPreview(state)
 	})
 	state.ParseButton.Importance = widget.MediumImportance
@@ -288,8 +319,6 @@ func createTemplateTab(state *WizardState) fyne.CanvasObject {
 		availableOutbounds = []string{defaultOutboundTag, rejectActionName}
 	}
 
-	baseSectionsInfo := widget.NewLabel("Base sections are always included in the generated config.")
-
 	rulesBox := container.NewVBox()
 	if len(state.SelectableRuleStates) == 0 {
 		rulesBox.Add(widget.NewLabel("No selectable rules defined in template."))
@@ -362,12 +391,21 @@ func createTemplateTab(state *WizardState) fyne.CanvasObject {
 	})
 	finalSelect.SetSelected(state.SelectedFinalOutbound)
 	state.FinalOutboundSelect = finalSelect
-	finalRow := container.NewHBox(
-		widget.NewLabel("Final outbound:"),
-		finalSelect,
-		layout.NewSpacer(),
-	)
 
+	rulesScroll := createRulesScroll(state, rulesBox)
+
+	state.refreshOutboundOptions()
+
+	return container.NewVBox(
+		widget.NewLabel("Selectable rules"),
+		rulesScroll,
+		widget.NewSeparator(),
+		widget.NewLabel("Final outbound"),
+		container.NewHBox(finalSelect, layout.NewSpacer()),
+	)
+}
+
+func createPreviewTab(state *WizardState) fyne.CanvasObject {
 	state.TemplatePreviewEntry = widget.NewMultiLineEntry()
 	state.TemplatePreviewEntry.SetPlaceHolder("Preview will appear here")
 	state.TemplatePreviewEntry.Wrapping = fyne.TextWrapOff
@@ -377,41 +415,103 @@ func createTemplateTab(state *WizardState) fyne.CanvasObject {
 		}
 		state.setTemplatePreviewText(state.TemplatePreviewText)
 	}
-	previewHeightRect := canvas.NewRectangle(color.Transparent)
-	previewHeightRect.SetMinSize(fyne.NewSize(0, 260))
 	previewWithHeight := container.NewMax(
-		previewHeightRect,
+		canvas.NewRectangle(color.Transparent),
 		state.TemplatePreviewEntry,
 	)
 	state.setTemplatePreviewText("Preview will appear here")
-	applyButton := widget.NewButton("Write config.json", func() {
+
+	previewScroll := container.NewVScroll(previewWithHeight)
+	maxHeight := state.Window.Canvas().Size().Height * 0.7
+	if maxHeight <= 0 {
+		maxHeight = 480
+	}
+	previewScroll.SetMinSize(fyne.NewSize(0, maxHeight))
+
+	saveButton := widget.NewButton("Save", func() {
+		if strings.TrimSpace(state.ParserConfigEntry.Text) == "" {
+			dialog.ShowError(fmt.Errorf("ParserConfig is empty"), state.Window)
+			return
+		}
+		if strings.TrimSpace(state.VLESSURLEntry.Text) == "" {
+			dialog.ShowError(fmt.Errorf("VLESS URL is empty"), state.Window)
+			return
+		}
+		if state.previewNeedsParse {
+			state.triggerParseForPreview()
+			dialog.ShowInformation("Parsing", "Parsing subscription... Please save once it completes.", state.Window)
+			return
+		}
+		if state.autoParseInProgress {
+			dialog.ShowInformation("Parsing", "Parsing in progress... Please wait.", state.Window)
+			return
+		}
 		text, err := buildTemplateConfig(state)
 		if err != nil {
 			dialog.ShowError(err, state.Window)
 			return
 		}
-		if err := os.WriteFile(state.Controller.ConfigPath, []byte(text), 0644); err != nil {
+		if path, err := state.saveConfigWithBackup(text); err != nil {
 			dialog.ShowError(err, state.Window)
-			return
+		} else {
+			dialog.ShowInformation("Config Saved", fmt.Sprintf("Config written to %s", path), state.Window)
 		}
-		dialog.ShowInformation("Template Applied", fmt.Sprintf("Config written to %s", state.Controller.ConfigPath), state.Window)
 	})
 
-	state.updateTemplatePreview()
-	state.refreshOutboundOptions()
-
 	return container.NewVBox(
-		widget.NewLabel("Base sections"),
-		baseSectionsInfo,
-		widget.NewSeparator(),
-		finalRow,
-		widget.NewSeparator(),
-		widget.NewLabel("Selectable rules"),
-		rulesBox,
-		widget.NewSeparator(),
-		container.NewHBox(layout.NewSpacer(), applyButton),
-		previewWithHeight,
+		widget.NewLabel("Preview"),
+		previewScroll,
+		container.NewHBox(layout.NewSpacer(), saveButton),
 	)
+}
+
+func createRulesScroll(state *WizardState, content fyne.CanvasObject) fyne.CanvasObject {
+	maxHeight := state.Window.Canvas().Size().Height * 0.7
+	if maxHeight <= 0 {
+		maxHeight = 480
+	}
+	scroll := container.NewVScroll(content)
+	scroll.SetMinSize(fyne.NewSize(0, maxHeight))
+	return scroll
+}
+
+func (state *WizardState) saveConfigWithBackup(text string) (string, error) {
+	configPath := state.Controller.ConfigPath
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		return "", err
+	}
+	if info, err := os.Stat(configPath); err == nil && !info.IsDir() {
+		backup := state.nextBackupPath(configPath)
+		if err := os.Rename(configPath, backup); err != nil {
+			return "", err
+		}
+	} else if err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+	if err := os.WriteFile(configPath, []byte(text), 0o644); err != nil {
+		return "", err
+	}
+	// Update config status in Core Dashboard if callback is set
+	if state.Controller != nil && state.Controller.UpdateConfigStatusFunc != nil {
+		state.Controller.UpdateConfigStatusFunc()
+	}
+	return configPath, nil
+}
+
+func (state *WizardState) nextBackupPath(path string) string {
+	dir := filepath.Dir(path)
+	ext := filepath.Ext(path)
+	base := strings.TrimSuffix(filepath.Base(path), ext)
+	candidate := filepath.Join(dir, fmt.Sprintf("%s-old%s", base, ext))
+	if _, err := os.Stat(candidate); os.IsNotExist(err) {
+		return candidate
+	}
+	for i := 1; ; i++ {
+		candidate = filepath.Join(dir, fmt.Sprintf("%s-old-%d%s", base, i, ext))
+		if _, err := os.Stat(candidate); os.IsNotExist(err) {
+			return candidate
+		}
+	}
 }
 
 // loadConfigFromFile загружает данные из существующего config.json
@@ -444,7 +544,10 @@ func loadConfigFromFile(state *WizardState) (bool, error) {
 		return false, err
 	}
 
+	state.parserConfigUpdating = true
 	state.ParserConfigEntry.SetText(string(parserConfigJSON))
+	state.parserConfigUpdating = false
+	state.previewNeedsParse = true
 
 	log.Println("ConfigWizard: Successfully loaded config from file")
 	return true, nil
@@ -509,6 +612,11 @@ func checkURL(state *WizardState) {
 
 // parseAndPreview парсит ParserConfig и генерирует предпросмотр outbounds
 func parseAndPreview(state *WizardState) {
+	defer func() {
+		fyne.Do(func() {
+			state.autoParseInProgress = false
+		})
+	}()
 	fyne.Do(func() {
 		state.ParseButton.Disable()
 		state.ParseButton.SetText("Parsing...")
@@ -649,7 +757,9 @@ func parseAndPreview(state *WizardState) {
 		state.ParseButton.SetText("Parse")
 		state.GeneratedOutbounds = selectorsJSON
 		state.ParserConfig = &parserConfig
+		state.previewNeedsParse = false
 		state.refreshOutboundOptions()
+		state.updateTemplatePreview()
 	})
 }
 
@@ -658,6 +768,36 @@ func setPreviewText(state *WizardState, text string) {
 	if state.OutboundsPreview != nil {
 		state.OutboundsPreview.SetText(text)
 	}
+}
+
+func (state *WizardState) applyURLToParserConfig(url string) {
+	if state.ParserConfigEntry == nil || url == "" {
+		return
+	}
+	text := strings.TrimSpace(state.ParserConfigEntry.Text)
+	if text == "" {
+		return
+	}
+	var parserConfig core.ParserConfig
+	if err := json.Unmarshal([]byte(text), &parserConfig); err != nil {
+		return
+	}
+	if len(parserConfig.ParserConfig.Proxies) == 0 {
+		parserConfig.ParserConfig.Proxies = []core.ProxySource{
+			{Source: url},
+		}
+	} else {
+		parserConfig.ParserConfig.Proxies[0].Source = url
+	}
+	serialized, err := serializeParserConfig(&parserConfig)
+	if err != nil {
+		return
+	}
+	state.parserConfigUpdating = true
+	state.ParserConfigEntry.SetText(serialized)
+	state.parserConfigUpdating = false
+	state.ParserConfig = &parserConfig
+	state.previewNeedsParse = true
 }
 
 func (state *WizardState) setTemplatePreviewText(text string) {
@@ -713,6 +853,23 @@ func (state *WizardState) refreshOutboundOptions() {
 	})
 }
 
+func (state *WizardState) triggerParseForPreview() {
+	if state.autoParseInProgress {
+		return
+	}
+	if !state.previewNeedsParse && len(state.GeneratedOutbounds) > 0 {
+		return
+	}
+	if state.VLESSURLEntry == nil || state.ParserConfigEntry == nil {
+		return
+	}
+	if strings.TrimSpace(state.VLESSURLEntry.Text) == "" || strings.TrimSpace(state.ParserConfigEntry.Text) == "" {
+		return
+	}
+	state.autoParseInProgress = true
+	go parseAndPreview(state)
+}
+
 func (state *WizardState) updateTemplatePreview() {
 	if state.TemplateData == nil || state.TemplatePreviewEntry == nil {
 		return
@@ -739,16 +896,44 @@ func buildTemplateConfig(state *WizardState) (string, error) {
 			continue
 		}
 		raw := state.TemplateData.Sections[key]
-		if key == "route" {
+		var formatted string
+		var err error
+		if key == "outbounds" && state.TemplateData.HasParserOutboundsBlock {
+			// If template had @PARSER_OUTBOUNDS_BLOCK marker, replace entire outbounds array
+			// with generated content
+			content := state.buildParserOutboundsBlock()
+
+			// Add elements after marker if they exist (any elements, not just direct-out)
+			if state.TemplateData.OutboundsAfterMarker != "" {
+				// Убираем лишние пробелы и запятые
+				cleaned := strings.TrimSpace(state.TemplateData.OutboundsAfterMarker)
+				cleaned = strings.TrimRight(cleaned, ",")
+				if cleaned != "" {
+					indented := indentMultiline(cleaned, "    ")
+					// НЕ добавляем запятую перед элементами - она уже есть после последнего элемента перед @ParserEND
+					content += "\n" + indented
+				}
+			}
+			// Всегда добавляем \n в конце content перед закрывающей скобкой
+			content += "\n"
+
+			// Wrap content in array brackets
+			formatted = "[\n" + content + "\n  ]"
+		} else if key == "route" {
 			merged, err := mergeRouteSection(raw, state.SelectableRuleStates, state.SelectedFinalOutbound)
 			if err != nil {
 				return "", fmt.Errorf("route merge failed: %w", err)
 			}
 			raw = merged
-		}
-		formatted, err := formatSectionJSON(raw, 2)
-		if err != nil {
-			formatted = string(raw)
+			formatted, err = formatSectionJSON(raw, 2)
+			if err != nil {
+				formatted = string(raw)
+			}
+		} else {
+			formatted, err = formatSectionJSON(raw, 2)
+			if err != nil {
+				formatted = string(raw)
+			}
 		}
 		sections = append(sections, fmt.Sprintf(`  "%s": %s`, key, formatted))
 	}
@@ -763,7 +948,6 @@ func buildTemplateConfig(state *WizardState) (string, error) {
 	builder.WriteString(strings.Join(sections, ",\n"))
 	builder.WriteString("\n}\n")
 	result := builder.String()
-	result = strings.ReplaceAll(result, `"__PARSER_BLOCK__"`, "/** @ParserSTART */\n    /** @ParserEND */")
 	return result, nil
 }
 
@@ -826,6 +1010,44 @@ func containsString(items []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func (state *WizardState) buildParserOutboundsBlock() string {
+	const indent = "    "
+	var builder strings.Builder
+	builder.WriteString(indent + "/** @ParserSTART */\n")
+	count := len(state.GeneratedOutbounds)
+	// Проверяем, есть ли элементы после маркера (любые, не только direct-out)
+	hasAfterMarker := state.TemplateData != nil &&
+		strings.TrimSpace(state.TemplateData.OutboundsAfterMarker) != ""
+
+	for idx, entry := range state.GeneratedOutbounds {
+		// Убираем запятые и пробелы в конце строки, если они есть
+		cleaned := strings.TrimRight(entry, ",\n\r\t ")
+		indented := indentMultiline(cleaned, indent)
+		builder.WriteString(indented)
+		// Добавляем запятую:
+		// - если не последний элемент (всегда)
+		// - или если последний элемент И есть элементы после маркера
+		if idx < count-1 || hasAfterMarker {
+			builder.WriteString(",")
+		}
+		builder.WriteString("\n")
+	}
+	endLine := indent + "/** @ParserEND */"
+	builder.WriteString(endLine) // Без запятой и без \n
+	return builder.String()
+}
+
+func indentMultiline(text, indent string) string {
+	if text == "" {
+		return indent
+	}
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		lines[i] = indent + line
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (state *WizardState) ensureFinalSelected(options []string) {

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -20,11 +21,13 @@ func tplLog(level debuglog.Level, format string, args ...interface{}) {
 }
 
 type TemplateData struct {
-	ParserConfig    string
-	Sections        map[string]json.RawMessage
-	SectionOrder    []string
-	SelectableRules []TemplateSelectableRule
-	DefaultFinal    string
+	ParserConfig            string
+	Sections                map[string]json.RawMessage
+	SectionOrder            []string
+	SelectableRules         []TemplateSelectableRule
+	DefaultFinal            string
+	HasParserOutboundsBlock bool   // true if @PARSER_OUTBOUNDS_BLOCK marker was found in template
+	OutboundsAfterMarker    string // Elements after @PARSER_OUTBOUNDS_BLOCK marker (e.g., direct-out)
 }
 
 type TemplateSelectableRule struct {
@@ -57,6 +60,20 @@ func loadTemplateData(execDir string) (*TemplateData, error) {
 		}
 	}
 
+	// Check for @PARSER_OUTBOUNDS_BLOCK marker before parsing JSON
+	// (JSON parser will ignore comments, so we need to check the raw string)
+	hasParserBlock := strings.Contains(cleaned, "@PARSER_OUTBOUNDS_BLOCK")
+	tplLog(debuglog.LevelVerbose, "Has @PARSER_OUTBOUNDS_BLOCK marker: %v", hasParserBlock)
+
+	// Extract elements after the marker (e.g., direct-out)
+	var outboundsAfterMarker string
+	if hasParserBlock {
+		outboundsAfterMarker = extractOutboundsAfterMarker(cleaned)
+		if outboundsAfterMarker != "" {
+			tplLog(debuglog.LevelVerbose, "Extracted outbounds after marker (first 200 chars): %s", truncateString(outboundsAfterMarker, 200))
+		}
+	}
+
 	// Validate JSON before parsing
 	jsonBytes := jsonc.ToJSON([]byte(cleaned))
 	tplLog(debuglog.LevelVerbose, "After jsonc.ToJSON, jsonBytes length: %d", len(jsonBytes))
@@ -68,16 +85,15 @@ func loadTemplateData(execDir string) (*TemplateData, error) {
 
 	tplLog(debuglog.LevelVerbose, "JSON is valid, proceeding to unmarshal")
 
-	sections := make(map[string]json.RawMessage)
-	if err := json.Unmarshal(jsonBytes, &sections); err != nil {
+	// Parse JSON while preserving key order from template
+	sections, sectionOrder, err := parseJSONWithOrder(jsonBytes)
+	if err != nil {
 		tplLog(debuglog.LevelError, "JSON unmarshal failed: %v", err)
 		return nil, fmt.Errorf("failed to parse config_template.json: %w", err)
 	}
 
 	tplLog(debuglog.LevelVerbose, "Successfully unmarshaled %d sections", len(sections))
-
-	sectionOrder := orderTemplateSections(sections)
-	tplLog(debuglog.LevelTrace, "Section order: %v", sectionOrder)
+	tplLog(debuglog.LevelTrace, "Section order from template: %v", sectionOrder)
 
 	defaultFinal := extractDefaultFinal(sections)
 	if defaultFinal != "" {
@@ -93,11 +109,13 @@ func loadTemplateData(execDir string) (*TemplateData, error) {
 	tplLog(debuglog.LevelVerbose, "Successfully parsed %d selectable rules", len(selectableRules))
 
 	result := &TemplateData{
-		ParserConfig:    strings.TrimSpace(parserConfig),
-		Sections:        sections,
-		SectionOrder:    sectionOrder,
-		SelectableRules: selectableRules,
-		DefaultFinal:    defaultFinal,
+		ParserConfig:            strings.TrimSpace(parserConfig),
+		Sections:                sections,
+		SectionOrder:            sectionOrder,
+		SelectableRules:         selectableRules,
+		DefaultFinal:            defaultFinal,
+		HasParserOutboundsBlock: hasParserBlock,
+		OutboundsAfterMarker:    outboundsAfterMarker,
 	}
 
 	tplLog(debuglog.LevelInfo, "Successfully loaded template data with %d sections and %d selectable rules", len(sections), len(selectableRules))
@@ -308,6 +326,97 @@ func normalizeRuleJSON(body string, blockIndex int) (string, error) {
 
 	normalized := fmt.Sprintf("[%s]", trimmed)
 	return normalized, nil
+}
+
+// parseJSONWithOrder parses JSON while preserving the order of keys
+func parseJSONWithOrder(jsonBytes []byte) (map[string]json.RawMessage, []string, error) {
+	sections := make(map[string]json.RawMessage)
+	var order []string
+
+	decoder := json.NewDecoder(bytes.NewReader(jsonBytes))
+
+	// Skip the opening '{'
+	token, err := decoder.Token()
+	if err != nil {
+		return nil, nil, err
+	}
+	if delim, ok := token.(json.Delim); !ok || delim != '{' {
+		return nil, nil, fmt.Errorf("expected object start, got %v", token)
+	}
+
+	// Read keys in order
+	for decoder.More() {
+		// Read key
+		keyToken, err := decoder.Token()
+		if err != nil {
+			return nil, nil, err
+		}
+		key, ok := keyToken.(string)
+		if !ok {
+			return nil, nil, fmt.Errorf("expected string key, got %v", keyToken)
+		}
+
+		// Read value as RawMessage
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return nil, nil, fmt.Errorf("failed to decode value for key %s: %w", key, err)
+		}
+
+		sections[key] = value
+		order = append(order, key)
+	}
+
+	// Skip the closing '}'
+	token, err = decoder.Token()
+	if err != nil {
+		return nil, nil, err
+	}
+	if delim, ok := token.(json.Delim); !ok || delim != '}' {
+		return nil, nil, fmt.Errorf("expected object end, got %v", token)
+	}
+
+	return sections, order, nil
+}
+
+// extractOutboundsAfterMarker extracts elements that come after @PARSER_OUTBOUNDS_BLOCK marker
+// in the outbounds array (e.g., direct-out)
+func extractOutboundsAfterMarker(src string) string {
+	// Find the outbounds section
+	outboundsPattern := regexp.MustCompile(`(?is)"outbounds"\s*:\s*\[(.*?)\]`)
+	match := outboundsPattern.FindStringSubmatch(src)
+	if len(match) < 2 {
+		tplLog(debuglog.LevelTrace, "extractOutboundsAfterMarker: outbounds section not found")
+		return ""
+	}
+
+	outboundsContent := match[1]
+	tplLog(debuglog.LevelTrace, "extractOutboundsAfterMarker: found outbounds content (first 200 chars): %s", truncateString(outboundsContent, 200))
+
+	// Find the marker
+	markerPattern := regexp.MustCompile(`(?is)/\*\*\s*@PARSER_OUTBOUNDS_BLOCK\s*\*/(.*)`)
+	markerMatch := markerPattern.FindStringSubmatch(outboundsContent)
+	if len(markerMatch) < 2 {
+		tplLog(debuglog.LevelTrace, "extractOutboundsAfterMarker: marker not found in outbounds content")
+		return ""
+	}
+
+	// Extract content after marker
+	afterMarker := strings.TrimSpace(markerMatch[1])
+	tplLog(debuglog.LevelTrace, "extractOutboundsAfterMarker: content after marker (first 200 chars): %s", truncateString(afterMarker, 200))
+
+	// Remove leading commas and whitespace
+	afterMarker = strings.TrimLeft(afterMarker, ",\n\r\t ")
+
+	if afterMarker == "" {
+		tplLog(debuglog.LevelTrace, "extractOutboundsAfterMarker: no content after marker")
+		return ""
+	}
+
+	// Remove trailing comma if present
+	afterMarker = strings.TrimRight(afterMarker, ",\n\r\t ")
+
+	tplLog(debuglog.LevelVerbose, "extractOutboundsAfterMarker: extracted %d chars", len(afterMarker))
+	return afterMarker
 }
 
 func orderTemplateSections(sections map[string]json.RawMessage) []string {

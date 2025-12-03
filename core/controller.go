@@ -98,6 +98,7 @@ type AppController struct {
 	RefreshAPIFunc       func()
 	ResetAPIStateFunc    func()
 	UpdateCoreStatusFunc func() // Callback to update status in Core Dashboard
+	UpdateConfigStatusFunc func() // Callback to update config status in Core Dashboard
 	UpdateTrayMenuFunc   func() // Callback to update tray menu
 
 	// --- Parser progress UI ---
@@ -229,6 +230,7 @@ func NewAppController(appIconData, greyIconData, greenIconData, redIconData []by
 	ac.RefreshAPIFunc = func() { log.Println("RefreshAPIFunc handler is not set yet.") }
 	ac.ResetAPIStateFunc = func() { log.Println("ResetAPIStateFunc handler is not set yet.") }
 	ac.UpdateCoreStatusFunc = func() { log.Println("UpdateCoreStatusFunc handler is not set yet.") }
+	ac.UpdateConfigStatusFunc = func() { log.Println("UpdateConfigStatusFunc handler is not set yet.") }
 	ac.UpdateTrayMenuFunc = func() { log.Println("UpdateTrayMenuFunc handler is not set yet.") }
 	ac.UpdateParserProgressFunc = func(progress float64, status string) {
 		log.Printf("UpdateParserProgressFunc handler is not set yet. Progress: %.0f%%, Status: %s", progress, status)
@@ -584,6 +586,38 @@ func StartSingBoxProcess(ac *AppController) {
 		log.Printf("startSingBox: Capabilities check failed: %s", suggestion)
 		dialogs.ShowError(ac.MainWindow, fmt.Errorf("Linux capabilities required\n\n%s", suggestion))
 		return
+	}
+
+	// Reload API config from config.json before starting (in case it was corrupted)
+	log.Println("startSingBox: Reloading API config from config.json...")
+	if base, tok, err := api.LoadClashAPIConfig(ac.ConfigPath); err != nil {
+		log.Printf("startSingBox: Clash API config error: %v", err)
+		ac.ClashAPIBaseURL = ""
+		ac.ClashAPIToken = ""
+		ac.ClashAPIEnabled = false
+	} else {
+		ac.ClashAPIBaseURL = base
+		ac.ClashAPIToken = tok
+		ac.ClashAPIEnabled = true
+		log.Printf("startSingBox: API config reloaded successfully")
+	}
+
+	// Reload SelectedClashGroup from config
+	if ac.ClashAPIEnabled {
+		_, defaultSelector, err := GetSelectorGroupsFromConfig(ac.ConfigPath)
+		if err != nil {
+			log.Printf("startSingBox: Failed to get selector groups: %v", err)
+			ac.SelectedClashGroup = "proxy-out" // Default fallback
+		} else {
+			ac.SelectedClashGroup = defaultSelector
+			log.Printf("startSingBox: SelectedClashGroup reloaded: %s", defaultSelector)
+		}
+	}
+
+	// Reset API cache before starting
+	if ac.ResetAPIStateFunc != nil {
+		log.Println("startSingBox: Resetting API state cache...")
+		ac.ResetAPIStateFunc()
 	}
 
 	log.Println("startSingBox: Starting Sing-Box...")

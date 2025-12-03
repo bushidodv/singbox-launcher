@@ -3,13 +3,19 @@ package ui
 import (
 	"context"
 	"fmt"
+	"io"
 	"math/rand"
+	"net/http"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 
 	"singbox-launcher/core"
@@ -31,6 +37,9 @@ type CoreDashboardTab struct {
 	wintunDownloadButton    *widget.Button      // wintun.dll download button
 	wintunDownloadProgress  *widget.ProgressBar // Progress bar for wintun.dll download
 	wintunDownloadContainer fyne.CanvasObject   // Container for wintun button/progress bar
+	configStatusLabel       *widget.Label
+	templateDownloadButton  *widget.Button
+	wizardButton            *widget.Button
 
 	// Data
 	stopAutoUpdate           chan bool
@@ -49,34 +58,31 @@ func CreateCoreDashboardTab(ac *core.AppController) fyne.CanvasObject {
 	// Status block with buttons in one row
 	statusRow := tab.createStatusRow()
 
-	// Version and path block
 	versionBlock := tab.createVersionBlock()
+	configBlock := tab.createConfigBlock()
 
-	// wintun.dll block (Windows only)
 	var wintunBlock fyne.CanvasObject
 	if runtime.GOOS == "windows" {
 		wintunBlock = tab.createWintunBlock()
 	}
 
-	// Основной контейнер - все элементы в VBox, кнопка Exit в конце
+	coreRows := []fyne.CanvasObject{versionBlock}
+	if runtime.GOOS == "windows" && wintunBlock != nil {
+		coreRows = append(coreRows, wintunBlock)
+	}
+	coreRows = append(coreRows, configBlock)
+	coreInfo := container.NewVBox(coreRows...)
+
 	contentItems := []fyne.CanvasObject{
 		statusRow,
 		widget.NewSeparator(),
-		versionBlock,
-	}
-	if runtime.GOOS == "windows" && wintunBlock != nil {
-		contentItems = append(contentItems, wintunBlock) // Убрали separator перед wintunBlock
+		coreInfo,
+		widget.NewSeparator(),
 	}
 
-	// Горизонтальная линия и кнопки Setup Config и Exit в конце списка
-	contentItems = append(contentItems, widget.NewSeparator())
-	setupConfigButton := widget.NewButton("Setup Config", func() {
-		ShowConfigWizard(ac.MainWindow, ac)
-	})
-	setupConfigButton.Importance = widget.MediumImportance
+	// Горизонтальная линия и кнопка Exit в конце списка
 	exitButton := widget.NewButton("Exit", ac.GracefulExit)
-	// Кнопки в отдельных строках
-	contentItems = append(contentItems, container.NewCenter(setupConfigButton))
+	// Кнопка Exit в отдельной строке
 	contentItems = append(contentItems, container.NewCenter(exitButton))
 
 	content := container.NewVBox(contentItems...)
@@ -88,12 +94,20 @@ func CreateCoreDashboardTab(ac *core.AppController) fyne.CanvasObject {
 		})
 	}
 
+	// Регистрируем callback для обновления статуса конфига
+	tab.controller.UpdateConfigStatusFunc = func() {
+		fyne.Do(func() {
+			tab.updateConfigInfo()
+		})
+	}
+
 	// Первоначальное обновление
 	tab.updateBinaryStatus() // Проверяет наличие бинарника и вызывает updateRunningStatus
 	tab.updateVersionInfo()
 	if runtime.GOOS == "windows" {
 		tab.updateWintunStatus() // Проверяет наличие wintun.dll
 	}
+	tab.updateConfigInfo()
 
 	// Запускаем автообновление версии
 	tab.startAutoUpdate()
@@ -142,40 +156,62 @@ func (tab *CoreDashboardTab) createStatusRow() fyne.CanvasObject {
 	)
 }
 
+func (tab *CoreDashboardTab) createConfigBlock() fyne.CanvasObject {
+	title := widget.NewLabel("Config")
+	title.Importance = widget.MediumImportance
+
+	tab.configStatusLabel = widget.NewLabel("Checking config...")
+	tab.configStatusLabel.Wrapping = fyne.TextWrapOff
+
+	tab.wizardButton = widget.NewButton("⚙️ Wizard", func() {
+		ShowConfigWizard(tab.controller.MainWindow, tab.controller)
+	})
+	tab.wizardButton.Importance = widget.MediumImportance
+
+	tab.templateDownloadButton = widget.NewButton("Download Config Template", func() {
+		tab.downloadConfigTemplate()
+	})
+	tab.templateDownloadButton.Importance = widget.MediumImportance
+
+	// Initially hide both, updateConfigInfo will show the appropriate one
+	tab.wizardButton.Hide()
+	tab.templateDownloadButton.Hide()
+
+	return container.NewHBox(
+		title,
+		layout.NewSpacer(),
+		tab.configStatusLabel,
+		layout.NewSpacer(),
+		tab.wizardButton,
+		tab.templateDownloadButton,
+	)
+}
+
 // createVersionBlock creates a block with version (similar to wintun)
 func (tab *CoreDashboardTab) createVersionBlock() fyne.CanvasObject {
-	versionTitle := widget.NewLabel("Sing-box Ver.")
-	versionTitle.Importance = widget.MediumImportance
+	title := widget.NewLabel("Sing-box")
+	title.Importance = widget.MediumImportance
 
-	// sing-box status (version or "not found") - similar to wintunStatusLabel
 	tab.singboxStatusLabel = widget.NewLabel("Checking...")
 	tab.singboxStatusLabel.Wrapping = fyne.TextWrapOff
 
-	// Download/Update button to the right of status
 	tab.downloadButton = widget.NewButton("Download", func() {
 		tab.handleDownload()
 	})
 	tab.downloadButton.Importance = widget.MediumImportance
-	tab.downloadButton.Disable() // По умолчанию отключена, пока не проверим наличие бинарника
+	tab.downloadButton.Disable()
 
-	// Прогресс-бар для скачивания (скрыт по умолчанию)
 	tab.downloadProgress = widget.NewProgressBar()
 	tab.downloadProgress.Hide()
 	tab.downloadProgress.SetValue(0)
-
-	// Контейнер для кнопки/прогресс-бара - они занимают одно место, переключаются через Show/Hide
-	// Структура точно такая же, как у wintun
 	progressContainer := container.NewMax(tab.downloadProgress)
 	tab.downloadContainer = container.NewStack(tab.downloadButton, progressContainer)
 
-	// Объединяем статус и кнопку в одну строку с фиксированной шириной для правой части
-	singboxInfoContainer := container.NewGridWithColumns(2,
+	return container.NewHBox(
+		title,
+		layout.NewSpacer(),
 		tab.singboxStatusLabel,
 		tab.downloadContainer,
-	)
-
-	return container.NewVBox(
-		container.NewHBox(versionTitle, singboxInfoContainer),
 	)
 }
 
@@ -225,6 +261,37 @@ func (tab *CoreDashboardTab) updateRunningStatus() {
 			tab.stopButton.Enable()
 		} else {
 			tab.stopButton.Disable()
+		}
+	}
+}
+
+func (tab *CoreDashboardTab) updateConfigInfo() {
+	if tab.configStatusLabel == nil {
+		return
+	}
+	configPath := tab.controller.ConfigPath
+	if info, err := os.Stat(configPath); err == nil {
+		modTime := info.ModTime().Format("2006-01-02")
+		tab.configStatusLabel.SetText(fmt.Sprintf("%s ✅ %s", filepath.Base(configPath), modTime))
+	} else if os.IsNotExist(err) {
+		tab.configStatusLabel.SetText(fmt.Sprintf("%s ❌ not found", filepath.Base(configPath)))
+	} else {
+		tab.configStatusLabel.SetText(fmt.Sprintf("Config error: %v", err))
+	}
+
+	templatePath := filepath.Join(tab.controller.ExecDir, "bin", "config_template.json")
+	if _, err := os.Stat(templatePath); err != nil {
+		// Template not found - show download button, hide wizard
+		tab.templateDownloadButton.Show()
+		tab.templateDownloadButton.Enable()
+		if tab.wizardButton != nil {
+			tab.wizardButton.Hide()
+		}
+	} else {
+		// Template found - show wizard, hide download button
+		tab.templateDownloadButton.Hide()
+		if tab.wizardButton != nil {
+			tab.wizardButton.Show()
 		}
 	}
 }
@@ -297,6 +364,72 @@ func (tab *CoreDashboardTab) updateVersionInfoAsync() {
 				// Версия актуальна
 				tab.downloadButton.Hide()
 			}
+		})
+	}()
+}
+
+const configTemplateURL = "https://raw.githubusercontent.com/Leadaxe/singbox-launcher/main/bin/config_template.json"
+
+func (tab *CoreDashboardTab) downloadConfigTemplate() {
+	if tab.templateDownloadButton != nil {
+		tab.templateDownloadButton.Disable()
+	}
+	go func() {
+		resp, err := http.Get(configTemplateURL)
+		if err != nil {
+			fyne.Do(func() {
+				if tab.templateDownloadButton != nil {
+					tab.templateDownloadButton.Enable()
+				}
+				ShowError(tab.controller.MainWindow, fmt.Errorf("failed to download template: %w", err))
+			})
+			return
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			fyne.Do(func() {
+				if tab.templateDownloadButton != nil {
+					tab.templateDownloadButton.Enable()
+				}
+				ShowError(tab.controller.MainWindow, fmt.Errorf("download template failed: %s", resp.Status))
+			})
+			return
+		}
+		data, err := io.ReadAll(resp.Body)
+		if err != nil {
+			fyne.Do(func() {
+				if tab.templateDownloadButton != nil {
+					tab.templateDownloadButton.Enable()
+				}
+				ShowError(tab.controller.MainWindow, fmt.Errorf("failed to read template: %w", err))
+			})
+			return
+		}
+		target := filepath.Join(tab.controller.ExecDir, "bin", "config_template.json")
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			fyne.Do(func() {
+				if tab.templateDownloadButton != nil {
+					tab.templateDownloadButton.Enable()
+				}
+				ShowError(tab.controller.MainWindow, fmt.Errorf("failed to create bin directory: %w", err))
+			})
+			return
+		}
+		if err := os.WriteFile(target, data, 0o644); err != nil {
+			fyne.Do(func() {
+				if tab.templateDownloadButton != nil {
+					tab.templateDownloadButton.Enable()
+				}
+				ShowError(tab.controller.MainWindow, fmt.Errorf("failed to save template: %w", err))
+			})
+			return
+		}
+		fyne.Do(func() {
+			if tab.templateDownloadButton != nil {
+				tab.templateDownloadButton.Hide()
+			}
+			dialog.ShowInformation("Config Template", fmt.Sprintf("Template saved to %s", target), tab.controller.MainWindow)
+			tab.updateConfigInfo()
 		})
 	}()
 }
@@ -463,36 +596,29 @@ func (tab *CoreDashboardTab) startAutoUpdate() {
 
 // createWintunBlock creates a block for displaying wintun.dll status
 func (tab *CoreDashboardTab) createWintunBlock() fyne.CanvasObject {
-	wintunTitle := widget.NewLabel("WinTun DLL")
-	wintunTitle.Importance = widget.MediumImportance
+	title := widget.NewLabel("Wintun")
+	title.Importance = widget.MediumImportance
 
 	tab.wintunStatusLabel = widget.NewLabel("Checking...")
 	tab.wintunStatusLabel.Wrapping = fyne.TextWrapOff
 
-	// Кнопка скачивания wintun.dll
 	tab.wintunDownloadButton = widget.NewButton("Download", func() {
 		tab.handleWintunDownload()
 	})
 	tab.wintunDownloadButton.Importance = widget.MediumImportance
-	tab.wintunDownloadButton.Disable() // По умолчанию отключена
+	tab.wintunDownloadButton.Disable()
 
-	// Прогресс-бар для скачивания wintun.dll
 	tab.wintunDownloadProgress = widget.NewProgressBar()
 	tab.wintunDownloadProgress.Hide()
 	tab.wintunDownloadProgress.SetValue(0)
-
-	// Контейнер для кнопки/прогресс-бара wintun
 	progressContainer := container.NewMax(tab.wintunDownloadProgress)
 	tab.wintunDownloadContainer = container.NewStack(tab.wintunDownloadButton, progressContainer)
 
-	// Объединяем статус и кнопку в одну строку с фиксированной шириной для правой части
-	wintunInfoContainer := container.NewGridWithColumns(2,
+	return container.NewHBox(
+		title,
+		layout.NewSpacer(),
 		tab.wintunStatusLabel,
 		tab.wintunDownloadContainer,
-	)
-
-	return container.NewVBox(
-		container.NewHBox(wintunTitle, wintunInfoContainer),
 	)
 }
 

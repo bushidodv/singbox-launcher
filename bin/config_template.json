@@ -1,5 +1,8 @@
 {
-  /** @ParcerConfig
+// Documentation:
+// https://github.com/Leadaxe/singbox-launcher/blob/main/README.md#configuring-configjson
+
+/** @ParcerConfig
   {
     "version": 1,
     "ParserConfig": {
@@ -9,40 +12,16 @@
           "tag": "proxy-out",
           "type": "selector",
           "options": { "interrupt_exist_connections": true },
-          "outbounds": {
-            "proxies": { "tag": "!/(🇷🇺)/i" },
-            "addOutbounds": ["direct-out"],
-            "preferredDefault": { "tag": "/🇳🇱/i" }
-          },
           "comment": "Proxy group for everything that should go through VPN"
-        },
-        {
-          "tag": "ruvpn",
-          "type": "selector",
-          "options": {},
-          "outbounds": { "proxies": { "tag": "/🇷🇺/i" } },
-          "comment": "Proxy group for Russia"
-        },
-        {
-          "tag": "gemini-vpn",
-          "type": "selector",
-          "options": {},
-          "outbounds": { "proxies": { "comment": "/Gemini/i" } },
-          "comment": "Proxy group for Gemini services"
         }
       ]
     }
   }
-  */
+*/
 
   // Documentation:
-  // https://github.com/Leadaxe/singbox-launcher/blob/main/README.md#configuring-configjson
   // https://deepwiki.com/chika0801/sing-box-examples/
   // https://sing-box.sagernet.org/configuration/
-  //
-  // Downloads:
-  // https://github.com/SagerNet/sing-box/releases/
-  // https://www.wintun.net/
 
   // --- LOGGING SETTINGS -----------------------------------------------------
   // Defines log detail level, timestamp inclusion, and file output.
@@ -114,7 +93,7 @@
   ],
   // --- OUTGOING CONNECTIONS (OUTBOUNDS) ------------------------------------
   "outbounds": [
-    "__PARSER_BLOCK__",
+    /** @PARSER_OUTBOUNDS_BLOCK */
     { "type": "direct", "tag": "direct-out" }
   ],
   // --- ROUTING RULES -------------------------------------------------------
@@ -139,13 +118,13 @@
       { "domain_suffix": ["local"], "outbound": "direct-out" }
 /**   @SelectableRule
       @label Russian domains direct
-      @description Route Russian domains directly without VPN.
+      @description Route Russian domains
       { "rule_set": "ru-domains", "outbound": "direct-out" },
 */
 /**   @SelectableRule
       @label Russia-only services
       @description Use Russian VPN group for services available only inside Russia.
-      { "rule_set": "ru-inside", "outbound": "ruvpn" },
+      { "rule_set": "ru-inside", "outbound": "direct-out" },
 */
 /**   @SelectableRule
       @label Russian blocked resources
@@ -168,17 +147,17 @@
       { "protocol": ["bittorrent"], "outbound": "direct-out" },
 */
 /**   @SelectableRule
-      @label 2ip direct test
+      @label 2ip.io direct test
       @description Direct route for 2ip.io to check local IP.
       { "domain": ["2ip.io"], "outbound": "direct-out" },
 */
 /**   @SelectableRule
-      @label 2ip via proxy
+      @label 2ip.me via proxy
       @description Route 2ip.me through proxy to verify VPN IP.
       { "domain": ["2ip.me"], "outbound": "proxy-out" },
 */
 /**   @SelectableRule
-      @label 2ip Russian route
+      @label 2ip.ru Russian route
       @description Route 2ip.ru via Russian VPN group.
       { "domain": ["2ip.ru"], "outbound": "ruvpn" },
 */
@@ -190,7 +169,7 @@
 /**   @SelectableRule
       @label Gemini via Gemini VPN
       @description Use dedicated Gemini VPN selector for Gemini rule set.
-      { "rule_set": "gemini", "network": ["tcp", "udp"], "outbound": "gemini-vpn" },
+      { "rule_set": "gemini", "network": ["tcp", "udp"], "outbound": "proxy-out" },
 */
 /**   @SelectableRule
       @label Messengers via proxy
@@ -208,24 +187,9 @@
       },
 */
 /**   @SelectableRule
-      @label Valve IP ranges
-      @description Route Valve networks directly to avoid packet loss.
-      { "ip_cidr": ["162.254.192.0/18", "208.64.200.0/22", "205.196.6.0/24", "208.64.204.0/22", "146.66.152.0/24"], "outbound": "direct-out" },
-*/
-/**   @SelectableRule
       @label stop HTTP/3
       @description QUIC does not support UDP traffic proxying. Therefore, we stop HTTP/3. This may block QUIC traffic (used by Google, YouTube, Cloudflare, etc.), which may potentially reduce speed or availability for these services.
       { "action": "reject", "method": "drop", "network": ["udp"], "port": [443] },
-*/
-/**   @SelectableRule
-      @label Russian domains via proxy
-      @description Force Russian domains through proxy selector instead of direct.
-      { "rule_set": "ru-domains", "outbound": "proxy-out" },
-*/
-/**   @SelectableRule
-      @label Gemini via proxy
-      @description Route Gemini rule set through main proxy selector.
-      { "rule_set": "gemini", "outbound": "proxy-out" },
 */
     ],
     "final": "proxy-out",
