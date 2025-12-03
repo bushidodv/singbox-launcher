@@ -3,6 +3,7 @@
 [![GitHub](https://img.shields.io/badge/GitHub-Leadaxe%2Fsingbox--launcher-blue)](https://github.com/Leadaxe/singbox-launcher)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Go Version](https://img.shields.io/badge/Go-1.24%2B-blue)](https://golang.org/)
+[![Version](https://img.shields.io/badge/version-0.2.0-blue)](https://github.com/Leadaxe/singbox-launcher/releases)
 
 Cross-platform GUI launcher for [sing-box](https://github.com/SagerNet/sing-box) - universal proxy client.
 
@@ -10,14 +11,30 @@ Cross-platform GUI launcher for [sing-box](https://github.com/SagerNet/sing-box)
 
 **🌐 Languages**: [English](README.md) | [Русский](README_RU.md)
 
+## 📸 Screenshots
+
+### Core Dashboard
+![Core Dashboard](https://github.com/user-attachments/assets/660d5f8d-6b2e-4dfa-ba6a-0c6906b383ee)
+
+### Config Wizard
+![Config Wizard - VLESS Sources & ParserConfig](https://github.com/user-attachments/assets/389e3c08-f92e-4ef1-bea1-39074b9b6eca)
+
+![Config Wizard - Rules Tab](https://github.com/user-attachments/assets/9801820b-501c-4221-ba56-96f3442445b0)
+
+### Preview & Clash API
+![Config Wizard Preview and Clash API](https://github.com/user-attachments/assets/07d290c1-cdab-4fd4-bd12-a39c77b3bd68)
+
 ## 🚀 Features
 
 - ✅ **Cross-platform**: Windows, macOS, Linux (Android in development)
 - 🎯 **Simple Control**: Start/stop VPN with one button
+- 🧙 **Config Wizard** (v0.2.0): Visual step-by-step configuration without editing JSON
 - 📊 **Clash API Integration**: Manage proxies via Clash-compatible API
+- 🤖 **Auto-loaders**: Automatic proxy loading from Clash API on startup
 - 🔄 **Automatic Configuration Update**: Parse subscriptions and update proxy list
+- 🔁 **Auto-restart**: Intelligent crash recovery with stability monitoring
 - 📈 **Diagnostics**: IP check, STUN, file verification
-- 🔔 **System Tray**: Run from system tray
+- 🔔 **System Tray**: Run from system tray with proxy selection
 - 📝 **Logging**: Detailed logs of all operations
 
 ## 💡 Why this launcher?
@@ -113,21 +130,50 @@ This launcher solves all of that. Everything is controlled from one clean GUI:
 
 ### First Launch
 
-1. Configure `config.json` (see [Configuration](#-configuration) section)
-2. **Download sing-box and wintun.dll** (if not already present):
+#### Option 1: Using Config Wizard (Recommended)
+
+1. **Download sing-box and wintun.dll** (if not already present):
    - Open the **"Core"** tab
    - Click **"Download"** to download `sing-box` (automatically detects your platform)
    - On Windows, click **"Download wintun.dll"** if needed
    - Files will be downloaded to the `bin/` folder automatically
+
+2. **Configure using Wizard**:
+   - If `config.json` is missing, click the blue **"Wizard"** button in the **"Core"** tab
+   - If `config_template.json` is missing, click **"Download Config Template"** first
+   - Follow the wizard steps:
+     - **Tab 1 (VLESS Sources & ParserConfig)**: Enter subscription URL, configure ParserConfig
+     - **Tab 2 (Rules)**: Select routing rules, configure outbound selectors
+     - **Tab 3 (Preview)**: Review generated configuration and save
+   - The wizard will create `config.json` automatically
+
+3. Click the **"Start"** button in the **"Core"** tab to start sing-box
+
+#### Option 2: Manual Configuration
+
+1. Configure `config.json` manually (see [Configuration](#-configuration) section)
+2. **Download sing-box and wintun.dll** (if not already present):
+   - Open the **"Core"** tab
+   - Click **"Download"** to download `sing-box` (automatically detects your platform)
+   - On Windows, click **"Download wintun.dll"** if needed
 3. Click the **"Start"** button in the **"Core"** tab to start sing-box
 
 ### Main Features
 
 #### "Core" Tab
+
+![Core Dashboard](https://github.com/user-attachments/assets/660d5f8d-6b2e-4dfa-ba6a-0c6906b383ee)
+
 - **Core Status** - Shows sing-box running status (Running/Stopped/Error)
+  - Displays restart counter during auto-restart attempts (e.g., `[restart 2/3]`)
+  - Counter automatically resets after 3 minutes of stable operation
 - **Sing-box Ver.** - Displays installed version (clickable on Windows to open file location)
-- **Update** button - Download or update sing-box binary
+- **Update** button (🔄) - Download or update sing-box binary
 - **WinTun DLL** (Windows only) - Shows wintun.dll status and download button
+- **Config Status** - Shows config.json status and last modification date (YYYY-MM-DD)
+- **Wizard** button (⚙️) - Open configuration wizard (blue if config.json is missing)
+- **Update Config** button (🔄) - Update configuration from subscriptions (disabled if config.json is missing)
+- **Download Config Template** button - Download config_template.json (blue if template is missing)
 - Automatic fallback to SourceForge mirror if GitHub is unavailable
 
 #### "Diagnostics" Tab
@@ -137,22 +183,70 @@ This launcher solves all of that. Everything is controlled from one clean GUI:
 
 #### "Tools" Tab
 - **Open Logs Folder** - Open logs folder
-- **Update Config** - Update configuration from subscriptions
 - **Open Config Folder** - Open configuration folder
 - **Kill Sing-Box** - Force kill sing-box process
 
 #### "Clash API" Tab
+
+![Config Wizard Preview and Clash API](https://github.com/user-attachments/assets/07d290c1-cdab-4fd4-bd12-a39c77b3bd68)
+
 - **Test API Connection** - Test Clash API connection
 - **Load Proxies** - Load proxy list from selected group
 - Switch between proxy servers
 - Check latency (ping) for each proxy
+- **Auto-loaders**: Automatically loads proxies when sing-box starts
+- Tab is visually disabled (grayed out) when sing-box is not running
+
+### Config Wizard (v0.2.0)
+
+The Config Wizard provides a visual interface for configuring sing-box without manually editing JSON files.
+
+![Config Wizard - VLESS Sources & ParserConfig](https://github.com/user-attachments/assets/389e3c08-f92e-4ef1-bea1-39074b9b6eca)
+
+**Accessing the Wizard:**
+- Click the **"Wizard"** button (⚙️) in the **"Core"** tab
+- The button is blue (high importance) if `config.json` is missing
+
+**Wizard Tabs:**
+
+1. **VLESS Sources & ParserConfig**
+   - Enter subscription URL and validate connectivity
+   - Configure ParserConfig JSON with visual editor
+   - Preview generated outbounds
+   - Parse subscription and generate proxy list
+
+2. **Rules**
+
+![Config Wizard - Rules Tab](https://github.com/user-attachments/assets/9801820b-501c-4221-ba56-96f3442445b0)
+
+   - Select routing rules from template
+   - Configure outbound selectors for each rule
+   - Rules marked with `@default` directive are enabled by default
+   - Select final outbound for default route
+   - Scrollable list (70% of window height)
+
+3. **Preview**
+   - Real-time preview of generated configuration
+   - JSON validation before saving (supports JSONC with comments)
+   - Automatic backup of existing config (`config-old.json`, `config-old-1.json`, etc.)
+   - Auto-closes after successful save
+
+**Features:**
+- Loads existing configuration if available
+- Uses `config_template.json` for default rules
+- Supports JSONC (JSON with comments)
+- Automatic backup before saving
+- Navigation: Close/Next buttons on first two tabs, Close/Save on last tab
 
 ### System Tray
 
 The application runs in the system tray. Click the icon to:
 - Open the main window
 - Start/stop VPN
+- Select proxy server (if Clash API is enabled)
 - Exit the application
+
+**Auto-loaders**: Proxies are automatically loaded from Clash API when sing-box starts.
 
 ## ⚙️ Configuration
 
@@ -163,7 +257,8 @@ singbox-launcher/
 ├── bin/
 │   ├── sing-box.exe (or sing-box for Unix) - auto-downloaded via Core tab
 │   ├── wintun.dll (Windows only) - auto-downloaded via Core tab
-│   └── config.json - create from config.example.json
+│   ├── config.json - main configuration (created via wizard or manually)
+│   └── config_template.json - template for wizard (auto-downloaded if missing)
 ├── logs/
 │   ├── singbox-launcher.log
 │   ├── sing-box.log
@@ -171,7 +266,7 @@ singbox-launcher/
 └── singbox-launcher.exe (or singbox-launcher for Unix)
 ```
 
-**Note:** `sing-box` and `wintun.dll` can be downloaded automatically through the **Core** tab. The launcher will:
+**Note:** `sing-box`, `wintun.dll`, and `config_template.json` can be downloaded automatically through the **Core** tab. The launcher will:
 - Automatically detect your platform (Windows/macOS/Linux) and architecture (amd64/arm64)
 - Download the correct version from GitHub or SourceForge mirror (if GitHub is blocked)
 - Install files to the correct location
@@ -179,6 +274,43 @@ singbox-launcher/
 ### Configuring config.json
 
 The launcher uses the standard sing-box configuration file. Detailed documentation is available on the [official sing-box website](https://sing-box.sagernet.org/configuration/).
+
+#### Using Config Wizard
+
+The easiest way to configure is using the **Config Wizard**:
+1. Click **"Wizard"** button (⚙️) in the **"Core"** tab
+2. Follow the step-by-step instructions
+3. The wizard will generate a valid `config.json` automatically
+
+#### Manual Configuration
+
+If you prefer to edit `config.json` manually, see the sections below.
+
+#### Config Template (config_template.json)
+
+The `config_template.json` file provides a template for the Config Wizard and defines selectable routing rules.
+
+**Template Directives:**
+
+- `/** @ParcerConfig ... */` - Default parser configuration block
+- `/** @SelectableRule ... */` - Defines a selectable routing rule
+  - `@label` - Display name for the rule
+  - `@description` - Description shown in info tooltip
+  - `@default` - Rule is enabled by default when wizard opens
+- `/** @PARSER_OUTBOUNDS_BLOCK */` - Marker where generated outbounds are inserted
+
+**Example Rule:**
+
+```json
+/** @SelectableRule
+    @label Gemini via Gemini VPN
+    @default
+    @description Use dedicated Gemini VPN selector for Gemini rule set.
+    { "rule_set": "gemini", "network": ["tcp", "udp"], "outbound": "proxy-out" },
+*/
+```
+
+If the template is missing, you can download it via the **"Download Config Template"** button in the **"Core"** tab.
 
 #### Enabling Clash API
 
@@ -232,6 +364,8 @@ For automatic configuration updates from subscriptions, add at the beginning of 
 
 **📖 For detailed parser configuration documentation, see [ParserConfig.md](ParserConfig.md)**
 
+**Note:** You can configure all of this visually via the Config Wizard (recommended for beginners). Manual JSON editing is for advanced users.
+
 ## 🔄 Subscription Parser - Detailed Logic
 
 The subscription parser is a built-in feature that automatically updates the proxy server list in `config.json` from subscriptions (subscription URLs).
@@ -275,7 +409,7 @@ At the beginning of the `config.json` file, there should be a `/** @ParcerConfig
 
 #### 2. Update Process
 
-When you click the **"Update Config"** button in the "Tools" tab:
+When you click the **"Update Config"** button in the "Core" tab (or use the Config Wizard):
 
 1. **Reading Configuration**
    - Parser finds the `@ParcerConfig` block in `config.json`
@@ -412,14 +546,24 @@ Platform-specific functions are in the `internal/platform` package.
    - Go to the **"Core"** tab
    - Click **"Download"** to download sing-box automatically
    - On Windows, also download `wintun.dll` if TUN mode is used
-2. Check that `sing-box.exe` (or `sing-box`) file exists in the `bin/` folder
-2. Check `config.json` correctness
-3. Check logs in the `logs/` folder
+2. **Use Config Wizard** to create valid configuration:
+   - Click **"Wizard"** button (⚙️) in the **"Core"** tab
+   - Follow the wizard steps
+3. Check that `sing-box.exe` (or `sing-box`) file exists in the `bin/` folder
+4. Check `config.json` correctness
+5. Check logs in the `logs/` folder
+
+### Config Wizard not working
+
+1. **Download config template** if missing:
+   - Click **"Download Config Template"** button in the **"Core"** tab
+2. Make sure `config_template.json` exists in the `bin/` folder
+3. Check that the template file is valid JSON
 
 ### Clash API not working
 
 1. Make sure `experimental.clash_api` is enabled in `config.json`
-2. Check that sing-box is running
+2. Check that sing-box is running (tab is disabled when not running)
 3. Check logs in `logs/api.log`
 
 ### Permission issues (Linux/macOS)
@@ -435,6 +579,24 @@ Or configure permissions via `setcap`:
 ```bash
 sudo setcap cap_net_admin+ep ./singbox-launcher
 ```
+
+## 🔁 Auto-restart & Stability
+
+The launcher includes intelligent auto-restart functionality:
+
+**Features:**
+- Automatic restart on crashes (up to 3 attempts)
+- 2-second delay before restart to allow proper cleanup
+- Stability monitoring: counter resets after 180 seconds (3 minutes) of stable operation
+- Visual feedback: restart counter displayed in Core Status (e.g., `[restart 2/3]`)
+- No false warnings during auto-restart attempts
+- Status automatically updates when counter resets
+
+**Behavior:**
+- If sing-box crashes, the launcher will automatically attempt to restart it
+- After 3 failed attempts, it stops and shows an error message
+- If sing-box runs stably for 3 minutes after a restart, the counter resets
+- Status automatically updates when counter resets
 
 ## 🔨 Building from Source
 
