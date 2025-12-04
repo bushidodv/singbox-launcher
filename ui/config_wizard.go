@@ -1057,20 +1057,28 @@ func mergeRouteSection(raw json.RawMessage, states []*SelectableRuleState, final
 			continue
 		}
 		cloned := cloneRule(state.Rule)
+
 		outbound := state.SelectedOutbound
 		if outbound == "" {
 			outbound = state.Rule.DefaultOutbound
 		}
-		if outbound != "" {
-			if outbound == rejectActionName {
-				delete(cloned, "outbound")
-				cloned["action"] = rejectActionName
-				cloned["method"] = rejectActionMethod
-			} else {
-				cloned["outbound"] = outbound
-				delete(cloned, "action")
-				delete(cloned, "method")
-			}
+
+		// Handle reject and drop selections
+		if outbound == rejectActionName {
+			// User selected reject - set action: reject without method, remove outbound
+			delete(cloned, "outbound")
+			cloned["action"] = rejectActionName
+			delete(cloned, "method")
+		} else if outbound == "drop" {
+			// User selected drop - set action: reject with method: drop, remove outbound
+			delete(cloned, "outbound")
+			cloned["action"] = rejectActionName
+			cloned["method"] = rejectActionMethod
+		} else if outbound != "" {
+			// User selected regular outbound - set outbound, remove action and method
+			cloned["outbound"] = outbound
+			delete(cloned, "action")
+			delete(cloned, "method")
 		}
 		rules = append(rules, cloned)
 	}
@@ -1219,7 +1227,9 @@ func (state *WizardState) getAvailableOutbounds() []string {
 	tags := map[string]struct{}{
 		defaultOutboundTag: {},
 		rejectActionName:   {},
+		"drop":             {}, // Always include "drop" in available options
 	}
+
 	var parserCfg *core.ParserConfig
 	if state.ParserConfig != nil {
 		parserCfg = state.ParserConfig

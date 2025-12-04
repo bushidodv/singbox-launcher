@@ -250,7 +250,38 @@ func parseSelectableRules(blocks []string) ([]TemplateSelectableRule, error) {
 				}
 			}
 
-			if outboundVal, hasOutbound := item["outbound"]; hasOutbound {
+			// Check if rule has action: reject
+			// If it does, ignore outbound field and set HasOutbound based on action: reject
+			actionVal, hasAction := item["action"]
+			if hasAction {
+				if actionStr, ok := actionVal.(string); ok && actionStr == "reject" {
+					// Rule has action: reject - ignore outbound field, set HasOutbound to true
+					// Default outbound depends on method field
+					rule.HasOutbound = true
+					methodVal, hasMethod := item["method"]
+					if hasMethod {
+						if methodStr, ok := methodVal.(string); ok && methodStr == "drop" {
+							// If method: drop, default outbound is "drop"
+							rule.DefaultOutbound = "drop"
+						} else {
+							// If action: reject with method but not drop, default outbound is "reject"
+							rule.DefaultOutbound = "reject"
+						}
+					} else {
+						// If action: reject without method, default outbound is "reject"
+						rule.DefaultOutbound = "reject"
+					}
+				} else {
+					// Action is not reject - check for outbound field
+					if outboundVal, hasOutbound := item["outbound"]; hasOutbound {
+						rule.HasOutbound = true
+						if outboundStr, ok := outboundVal.(string); ok {
+							rule.DefaultOutbound = outboundStr
+						}
+					}
+				}
+			} else if outboundVal, hasOutbound := item["outbound"]; hasOutbound {
+				// Rule has outbound field and no action field
 				rule.HasOutbound = true
 				if outboundStr, ok := outboundVal.(string); ok {
 					rule.DefaultOutbound = outboundStr
