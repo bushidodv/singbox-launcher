@@ -123,19 +123,24 @@ func ShowConfigWizard(parent fyne.Window, controller *core.AppController) {
 		previewNeedsParse: true,
 	}
 
+	if templateData, err := loadTemplateData(controller.ExecDir); err != nil {
+		errorLog("ConfigWizard: failed to load config_template.json from %s: %v", filepath.Join(controller.ExecDir, "bin", "config_template.json"), err)
+		// Update config status in Core Dashboard (similar to UpdateConfigStatusFunc)
+		if controller.UpdateConfigStatusFunc != nil {
+			controller.UpdateConfigStatusFunc()
+		}
+		// Show error to user
+		//	dialog.ShowError(fmt.Errorf("Failed to load template file:\n%v\n\nPlease ensure bin/config_template.json exists and is valid.", err), wizardWindow)
+		return
+	} else {
+		state.TemplateData = templateData
+	}
+
 	// Создаем новое окно для мастера
 	wizardWindow := controller.Application.NewWindow("Config Wizard")
 	wizardWindow.Resize(fyne.NewSize(920, 720))
 	wizardWindow.CenterOnScreen()
 	state.Window = wizardWindow
-
-	if templateData, err := loadTemplateData(controller.ExecDir); err != nil {
-		errorLog("ConfigWizard: failed to load config_template.json from %s: %v", filepath.Join(controller.ExecDir, "bin", "config_template.json"), err)
-		// Show error to user
-		dialog.ShowError(fmt.Errorf("Failed to load template file:\n%v\n\nPlease ensure bin/config_template.json exists and is valid.", err), wizardWindow)
-	} else {
-		state.TemplateData = templateData
-	}
 
 	// Создаем первую вкладку
 	tab1 := createVLESSSourceTab(state)
