@@ -94,7 +94,7 @@ func CreateClashAPITab(ac *core.AppController) fyne.CanvasObject {
 
 	onTestAPIConnection := func() {
 		if !ac.ClashAPIEnabled {
-			ac.ApiStatusLabel.SetText("❌ API Off (Config Error)")
+			ac.ApiStatusLabel.SetText("❌ ClashAPI Off (Config Error)")
 			ShowErrorText(ac.MainWindow, "Clash API", "API is disabled: config error")
 			return
 		}
@@ -102,11 +102,11 @@ func CreateClashAPITab(ac *core.AppController) fyne.CanvasObject {
 			err := api.TestAPIConnection(ac.ClashAPIBaseURL, ac.ClashAPIToken, ac.ApiLogFile)
 			fyne.Do(func() {
 				if err != nil {
-					ac.ApiStatusLabel.SetText("❌ API Off (Error)")
+					ac.ApiStatusLabel.SetText("❌ Clash API Off (Error)")
 					ShowError(ac.MainWindow, err)
 					return
 				}
-				ac.ApiStatusLabel.SetText("✅ API On")
+				ac.ApiStatusLabel.SetText("✅ Clash API On")
 				onLoadAndRefreshProxies()
 			})
 		}()
