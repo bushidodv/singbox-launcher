@@ -337,44 +337,7 @@ singbox-launcher/
 
 **Примеры правил:**
 
-```json
-/** @SelectableRule
-    @label Gemini via Gemini VPN
-    @default
-    @description Use dedicated Gemini VPN selector for Gemini rule set.
-    { "rule_set": "gemini", "network": ["tcp", "udp"], "outbound": "proxy-out" },
-*/
-```
-
-Это правило имеет поле `outbound`, поэтому визард покажет выпадающий список, позволяющий выбрать из доступных outbounds, `direct-out` или `reject`.
-
-```json
-/** @SelectableRule
-    @label Games direct
-    @default
-    @description Send gaming rule set traffic directly for lower latency.
-    { "rule_set": "games", "network": ["tcp", "udp"], "outbound": "direct-out" },
-*/
-```
-
-Это правило использует `direct-out` по умолчанию, но вы можете изменить его в визарде на любой другой доступный outbound.
-
-```json
-/** @SelectableRule
-    @label Block ads
-    @description Block advertising domains.
-    { "rule_set": "ads", "outbound": "direct-out" },
-*/
-```
-
-Это правило имеет поле `outbound`, поэтому визард покажет выпадающий список. Если вы выберете `reject` из выпадающего списка в визарде, это будет преобразовано в сгенерированном конфиге в:
-```json
-{ "rule_set": "ads", "action": "reject", "method": "drop" }
-```
-
-**Важно:** В шаблоне нельзя писать `"outbound": "reject"` напрямую. Шаблон должен использовать валидный тег outbound (например, `"direct-out"` или любой сгенерированный outbound). Опция `reject` появляется в выпадающем списке визарда, и при выборе она автоматически заменяет поле `outbound` на `"action": "reject", "method": "drop"` в финальной конфигурации.
-
-**Примечание:** Правила без поля `outbound` не могут быть настроены в визарде - они включаются как есть в финальную конфигурацию.
+См. [docs/CREATE_WIZARD_TEMPLATE_RU.md](docs/CREATE_WIZARD_TEMPLATE_RU.md) для подробных примеров и объяснений.
 
 Если шаблон отсутствует, вы можете скачать его через кнопку **"Download Config Template"** на вкладке **"Core"**.
 

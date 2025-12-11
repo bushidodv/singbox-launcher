@@ -334,44 +334,7 @@ When a rule has an `outbound` field, the wizard provides a dropdown with the fol
 
 **Example Rules:**
 
-```json
-/** @SelectableRule
-    @label Gemini via Gemini VPN
-    @default
-    @description Use dedicated Gemini VPN selector for Gemini rule set.
-    { "rule_set": "gemini", "network": ["tcp", "udp"], "outbound": "proxy-out" },
-*/
-```
-
-This rule has an `outbound` field, so the wizard will show a dropdown allowing you to select from available outbounds, `direct-out`, or `reject`.
-
-```json
-/** @SelectableRule
-    @label Games direct
-    @default
-    @description Send gaming rule set traffic directly for lower latency.
-    { "rule_set": "games", "network": ["tcp", "udp"], "outbound": "direct-out" },
-*/
-```
-
-This rule uses `direct-out` by default, but you can change it in the wizard to any other available outbound.
-
-```json
-/** @SelectableRule
-    @label Block ads
-    @description Block advertising domains.
-    { "rule_set": "ads", "outbound": "direct-out" },
-*/
-```
-
-This rule has an `outbound` field, so the wizard will show a dropdown. If you select `reject` from the dropdown in the wizard, it will be converted in the generated config to:
-```json
-{ "rule_set": "ads", "action": "reject", "method": "drop" }
-```
-
-**Important:** In the template, you cannot write `"outbound": "reject"` directly. The template must use a valid outbound tag (e.g., `"direct-out"` or any generated outbound). The `reject` option appears in the wizard's dropdown, and when selected, it automatically replaces the `outbound` field with `"action": "reject", "method": "drop"` in the final configuration.
-
-**Note:** Rules without an `outbound` field cannot be configured in the wizard - they are included as-is in the final configuration.
+See [docs/CREATE_WIZARD_TEMPLATE.md](docs/CREATE_WIZARD_TEMPLATE.md) for detailed examples and explanations.
 
 If the template is missing, you can download it via the **"Download Config Template"** button in the **"Core"** tab.
 
