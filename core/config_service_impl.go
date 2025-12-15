@@ -239,12 +239,17 @@ func (svc *ConfigService) ProcessProxySource(proxySource ProxySource, tagCounts 
 }
 
 // GenerateSelector generates JSON string for a selector from filtered nodes.
-// Filters nodes based on outboundConfig.Outbounds.Proxies, adds addOutbounds,
+// Filters nodes based on outboundConfig.Filters, adds addOutbounds,
 // determines default outbound from preferredDefault if specified, and builds
 // the selector JSON with correct field order.
 func (svc *ConfigService) GenerateSelector(allNodes []*parsers.ParsedNode, outboundConfig OutboundConfig) (string, error) {
-	// Filter nodes based on outbounds.proxies
-	filteredNodes := filterNodesForSelector(allNodes, outboundConfig.Outbounds.Proxies)
+	// Filter nodes based on filters (version 3) or legacy outbounds.proxies (version 2 and below)
+	filterMap := outboundConfig.Filters
+	if filterMap == nil && outboundConfig.Outbounds.Proxies != nil {
+		// Fallback to legacy structure for backward compatibility during migration
+		filterMap = outboundConfig.Outbounds.Proxies
+	}
+	filteredNodes := filterNodesForSelector(allNodes, filterMap)
 
 	if len(filteredNodes) == 0 {
 		log.Printf("Parser: No nodes matched filter for selector %s", outboundConfig.Tag)
@@ -256,10 +261,15 @@ func (svc *ConfigService) GenerateSelector(allNodes []*parsers.ParsedNode, outbo
 	seenTags := make(map[string]bool)
 	duplicateCountInSelector := 0
 
-	// Add addOutbounds first
-	if len(outboundConfig.Outbounds.AddOutbounds) > 0 {
-		log.Printf("Parser: Adding %d addOutbounds to selector '%s'", len(outboundConfig.Outbounds.AddOutbounds), outboundConfig.Tag)
-		for _, tag := range outboundConfig.Outbounds.AddOutbounds {
+	// Add addOutbounds first (version 3) or legacy outbounds.addOutbounds (version 2 and below)
+	addOutboundsList := outboundConfig.AddOutbounds
+	if len(addOutboundsList) == 0 && len(outboundConfig.Outbounds.AddOutbounds) > 0 {
+		// Fallback to legacy structure for backward compatibility during migration
+		addOutboundsList = outboundConfig.Outbounds.AddOutbounds
+	}
+	if len(addOutboundsList) > 0 {
+		log.Printf("Parser: Adding %d addOutbounds to selector '%s'", len(addOutboundsList), outboundConfig.Tag)
+		for _, tag := range addOutboundsList {
 			if !seenTags[tag] {
 				outboundsList = append(outboundsList, tag)
 				seenTags[tag] = true
@@ -288,10 +298,16 @@ func (svc *ConfigService) GenerateSelector(allNodes []*parsers.ParsedNode, outbo
 	log.Printf("Parser: Selector '%s' will have %d unique outbounds", outboundConfig.Tag, len(outboundsList))
 
 	// Determine default - only if preferredDefault is specified in config
+	// Use version 3 preferredDefault or legacy outbounds.preferredDefault (version 2 and below)
+	preferredDefaultMap := outboundConfig.PreferredDefault
+	if len(preferredDefaultMap) == 0 && len(outboundConfig.Outbounds.PreferredDefault) > 0 {
+		// Fallback to legacy structure for backward compatibility during migration
+		preferredDefaultMap = outboundConfig.Outbounds.PreferredDefault
+	}
 	defaultTag := ""
-	if len(outboundConfig.Outbounds.PreferredDefault) > 0 {
+	if len(preferredDefaultMap) > 0 {
 		// Find first node matching preferredDefault filter
-		preferredFilter := convertFilterToStringMap(outboundConfig.Outbounds.PreferredDefault)
+		preferredFilter := convertFilterToStringMap(preferredDefaultMap)
 		for _, node := range filteredNodes {
 			if matchesFilter(node, preferredFilter) {
 				defaultTag = node.Tag

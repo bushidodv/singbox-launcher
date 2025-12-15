@@ -166,7 +166,7 @@ func TestExtractParserConfig(t *testing.T) {
 
 	parserConfigJSON := `{
   "ParserConfig": {
-    "version": 2,
+    "version": 3,
     "proxies": [
       {
         "source": "https://example.com/subscription",
@@ -207,8 +207,8 @@ func TestExtractParserConfig(t *testing.T) {
 		if config == nil {
 			t.Fatal("Expected config, got nil")
 		}
-		if config.ParserConfig.Version != 2 {
-			t.Errorf("Expected version 2, got %d", config.ParserConfig.Version)
+		if config.ParserConfig.Version != 3 {
+			t.Errorf("Expected version 3, got %d", config.ParserConfig.Version)
 		}
 		if len(config.ParserConfig.Proxies) != 1 {
 			t.Errorf("Expected 1 proxy source, got %d", len(config.ParserConfig.Proxies))
@@ -249,7 +249,7 @@ func TestUpdateLastUpdatedInConfig(t *testing.T) {
 
 	parserConfigJSON := `{
   "ParserConfig": {
-    "version": 2,
+    "version": 3,
     "proxies": [],
     "outbounds": [],
     "parser": {

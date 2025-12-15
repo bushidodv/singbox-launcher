@@ -5,7 +5,7 @@
   /** @ParserConfig
     {
       "ParserConfig": {
-        "version": 2,
+        "version": 3,
         "proxies": [{ "source": "https://your-subscription-url-here" }],
         "outbounds": [
           {
@@ -17,19 +17,15 @@
               "tolerance": 100,
               "interrupt_exist_connections": true
             },
-            "outbounds": {
-              "proxies": { "tag": "!/(🇷🇺)/i" }
-            },
+            "filters": { "tag": "!/(🇷🇺)/i" },
 			      "comment": "Proxy automated group for everything that should go through VPN"
 		      },
           {
             "tag": "proxy-out",
             "type": "selector",
             "options": { "interrupt_exist_connections": true, "default": "auto-proxy-out"},
-            "outbounds": {
-            	"addOutbounds": ["direct-out","auto-proxy-out"],
-            	"proxies": { "tag": "!/(🇷🇺)/i" }
-            },
+            "filters": { "tag": "!/(🇷🇺)/i" },
+            "addOutbounds": ["direct-out","auto-proxy-out"],
             "comment": "Proxy group for everything that should go through VPN"
           },
           {
@@ -42,9 +38,7 @@
               "tolerance": 1000,
               "interrupt_exist_connections": true
             },
-            "outbounds": {
-              "addOutbounds": ["direct-out"]
-            },
+            "addOutbounds": ["direct-out"],
             "comment": "find any way"
           }
         ]

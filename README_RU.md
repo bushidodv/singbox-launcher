@@ -438,8 +438,8 @@ singbox-launcher/
 {
   /** @ParcerConfig
   {
-    "version": 1,
     "ParserConfig": {
+      "version": 3,
       "proxies": [
         {
           "source": "https://your-subscription-url.com/subscription",
@@ -455,11 +455,9 @@ singbox-launcher/
           "tag": "proxy-out",
           "type": "selector",
           "options": { "interrupt_exist_connections": true },
-          "outbounds": {
-            "proxies": { "tag": "!/(🇷🇺)/i" },
-            "addOutbounds": ["direct-out"],
-            "preferredDefault": { "tag": "/🇳🇱/i" }
-          },
+          "filters": { "tag": "!/(🇷🇺)/i" },
+          "addOutbounds": ["direct-out"],
+          "preferredDefault": { "tag": "/🇳🇱/i" },
           "comment": "Proxy group for international connections"
         }
       ]
@@ -503,9 +501,10 @@ singbox-launcher/
    - Если узел совпадает с любым фильтром из `skip` - он пропускается
    - Пример: `"skip": [ { "tag": "!/🇷🇺/i" } ]` - пропустить все НЕ российские прокси
    
-   **Фильтр `proxies`** (на уровне селектора):
+   **Фильтр `filters`** (на уровне селектора, версия 3):
    - Определяет, какие узлы попадут в конкретный селектор
-   - Пример: `"proxies": { "tag": "!/(🇷🇺)/i" }` - все кроме российских
+   - Пример: `"filters": { "tag": "!/(🇷🇺)/i" }` - все кроме российских
+   - **Примечание**: В версии 2 это поле называлось `outbounds.proxies`, в версии 3 переименовано в `filters` и вынесено на верхний уровень
 
    **Поддерживаемые поля фильтров:**
    - `tag` - имя тега (с учетом регистра и эмодзи)
@@ -565,17 +564,13 @@ vless://uuid@server3.com:443?...#🇺🇸США
   "outbounds": [
     {
       "tag": "proxy-out",
-      "outbounds": {
-        "proxies": { "tag": "!/(🇷🇺)/i" },
-        "addOutbounds": ["direct-out"],
-        "preferredDefault": { "tag": "/🇳🇱/i" }
-      }
+      "filters": { "tag": "!/(🇷🇺)/i" },
+      "addOutbounds": ["direct-out"],
+      "preferredDefault": { "tag": "/🇳🇱/i" }
     },
     {
       "tag": "ruvpn",
-      "outbounds": {
-        "proxies": { "tag": "/🇷🇺/i" }
-      }
+      "filters": { "tag": "/🇷🇺/i" }
     }
   ]
 }

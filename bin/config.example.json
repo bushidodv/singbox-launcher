@@ -51,33 +51,31 @@
 /** @ParcerConfig
 
 {
-  "version": 1,
   "ParserConfig": {
+    "version": 3,
     "proxies": [{ "source": "https://your-subscription-url-here" }],
     "outbounds": [
       {
         "tag": "proxy-out",
         "type": "selector",
         "options": { "interrupt_exist_connections": true },
-        "outbounds": {
-          "proxies": { "tag": "!/(🇷🇺)/i" },
-          "addOutbounds": ["direct-out"],
-          "preferredDefault": { "tag": "/🇳🇱/i" }
-        },
+        "filters": { "tag": "!/(🇷🇺)/i" },
+        "addOutbounds": ["direct-out"],
+        "preferredDefault": { "tag": "/🇳🇱/i" },
         "comment": "Proxy group for international connections"
       },
       {
         "tag": "ruvpn",
         "type": "selector",
         "options": {},
-        "outbounds": { "proxies": { "tag": "/🇷🇺/i" } },
+        "filters": { "tag": "/🇷🇺/i" },
         "comment": "Proxy group for Russia"
       },
       {
         "tag": "gemini-vpn",
         "type": "selector",
         "options": {},
-        "outbounds": { "proxies": { "comment": "/Gemini/i" } },
+        "filters": { "comment": "/Gemini/i" },
         "comment": "Proxy group for Gemini"
       }
     ]
