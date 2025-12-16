@@ -1161,10 +1161,10 @@ func (ac *AppController) CreateTrayMenu() *fyne.Menu {
 // Resumes after successful manual update
 func (ac *AppController) startAutoUpdateLoop() {
 	const (
-		minInterval    = 10 * time.Minute // Minimum interval (constant)
-		retryInterval   = 10 * time.Second // Interval between retry attempts
-		maxRetries      = 10               // Maximum consecutive failed attempts
-		defaultReload   = "4h"             // Default reload interval if not specified
+		minInterval   = 1 * time.Minute // Minimum interval (constant)
+		retryInterval = 1 * time.Second // Interval between retry attempts
+		maxRetries    = 10              // Maximum consecutive failed attempts
+		defaultReload = "4h"            // Default reload interval if not specified
 	)
 
 	log.Println("Auto-update: Starting auto-update loop")
@@ -1196,72 +1196,68 @@ func (ac *AppController) startAutoUpdateLoop() {
 		// Calculate check interval from config
 		checkInterval, err := ac.calculateAutoUpdateInterval()
 		if err != nil {
-			log.Printf("Auto-update: Failed to calculate interval: %v, using default 10 minutes", err)
+			log.Printf("Auto-update: Failed to calculate interval: %v, using default", err)
 			checkInterval = minInterval
 		}
 
 		log.Printf("Auto-update: Calculated interval: %v (min: %v)", checkInterval, minInterval)
 
-		// Wait for check interval
+		// Check if update is needed immediately (before waiting)
+		requiredInterval, err := ac.calculateAutoUpdateInterval()
+		if err != nil {
+			log.Printf("Auto-update: Failed to calculate required interval: %v, using default", err)
+			requiredInterval = minInterval
+		}
+		
+		needsUpdate, err := ac.shouldAutoUpdate(requiredInterval)
+		if err != nil {
+			log.Printf("Auto-update: Failed to check if update needed: %v, skipping this check", err)
+			// Don't stop auto-update on check errors, just skip this check and wait
+		} else if needsUpdate {
+			// Update is needed - check if already in progress
+			ac.ParserMutex.Lock()
+			updateInProgress := ac.ParserRunning
+			ac.ParserMutex.Unlock()
+
+			if !updateInProgress {
+				log.Println("Auto-update: Update needed, attempting update...")
+				success := ac.attemptAutoUpdateWithRetries(retryInterval, maxRetries)
+				if success {
+					// Success - error counter already reset in attemptAutoUpdateWithRetries
+					ac.AutoUpdateMutex.Lock()
+					if !ac.AutoUpdateEnabled {
+						ac.AutoUpdateEnabled = true
+						log.Println("Auto-update: Resumed after successful update")
+					}
+					ac.AutoUpdateMutex.Unlock()
+					log.Println("Auto-update: Completed successfully, error counter reset")
+				} else {
+					// Failed after all retries - check if we reached max consecutive failures
+					ac.AutoUpdateMutex.Lock()
+					if ac.AutoUpdateFailedAttempts >= maxRetries {
+						ac.AutoUpdateEnabled = false
+						ac.AutoUpdateMutex.Unlock()
+						log.Printf("Auto-update: Stopped after %d consecutive failed attempts", ac.AutoUpdateFailedAttempts)
+						fyne.Do(func() {
+							dialogs.ShowAutoHideInfo(ac.Application, ac.MainWindow, "Auto-update", "Automatic configuration update stopped after 10 failed attempts. Use manual update.")
+						})
+					} else {
+						ac.AutoUpdateMutex.Unlock()
+					}
+				}
+			} else {
+				log.Println("Auto-update: Update already in progress, skipping")
+			}
+		} else {
+			log.Printf("Auto-update: Update not needed yet, will check again in %v", checkInterval)
+		}
+
+		// Wait for check interval before next check
 		select {
 		case <-ac.ctx.Done():
 			return
 		case <-time.After(checkInterval):
-			// Time to check if update is needed
-		}
-
-		// Check if update is needed (recalculate required interval from config)
-		requiredInterval, err := ac.calculateAutoUpdateInterval()
-		if err != nil {
-			log.Printf("Auto-update: Failed to calculate required interval: %v, using default 10 minutes", err)
-			requiredInterval = minInterval
-		}
-		needsUpdate, err := ac.shouldAutoUpdate(requiredInterval)
-		if err != nil {
-			log.Printf("Auto-update: Failed to check if update needed: %v, skipping this check", err)
-			// Don't stop auto-update on check errors, just skip this check
-			continue
-		}
-
-		if !needsUpdate {
-			log.Printf("Auto-update: Update not needed yet, skipping")
-			continue
-		}
-
-		// Check if update is already in progress
-		ac.ParserMutex.Lock()
-		updateInProgress := ac.ParserRunning
-		ac.ParserMutex.Unlock()
-
-		if updateInProgress {
-			log.Println("Auto-update: Update already in progress, skipping")
-			continue
-		}
-
-		// Attempt update with retries
-		success := ac.attemptAutoUpdateWithRetries(retryInterval, maxRetries)
-		if success {
-			// Success - error counter already reset in attemptAutoUpdateWithRetries
-			ac.AutoUpdateMutex.Lock()
-			if !ac.AutoUpdateEnabled {
-				ac.AutoUpdateEnabled = true
-				log.Println("Auto-update: Resumed after successful update")
-			}
-			ac.AutoUpdateMutex.Unlock()
-			log.Println("Auto-update: Completed successfully, error counter reset")
-		} else {
-			// Failed after all retries - check if we reached max consecutive failures
-			ac.AutoUpdateMutex.Lock()
-			if ac.AutoUpdateFailedAttempts >= maxRetries {
-				ac.AutoUpdateEnabled = false
-				ac.AutoUpdateMutex.Unlock()
-				log.Printf("Auto-update: Stopped after %d consecutive failed attempts", ac.AutoUpdateFailedAttempts)
-				fyne.Do(func() {
-					dialogs.ShowAutoHideInfo(ac.Application, ac.MainWindow, "Auto-update", "Automatic configuration update stopped after 10 failed attempts. Use manual update.")
-				})
-			} else {
-				ac.AutoUpdateMutex.Unlock()
-			}
+			// Time for next check
 		}
 	}
 }
