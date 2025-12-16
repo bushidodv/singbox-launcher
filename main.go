@@ -34,6 +34,7 @@ const (
 func main() {
 	// Parse command line arguments
 	autoStart := flag.Bool("start", false, "Automatically start VPN on launch")
+	startInTray := flag.Bool("tray", false, "Start minimized to system tray (hide window on launch)")
 	flag.Parse()
 
 	// Create the application controller. If an error occurs, print it and exit the program.
@@ -147,6 +148,18 @@ func main() {
 					time.Sleep(autoStartDelay)
 					log.Println("Auto-start: Starting VPN due to -start parameter")
 					core.StartSingBoxProcess(controller)
+				}()
+			}
+
+			// Hide window if -tray flag is provided
+			if *startInTray {
+				go func() {
+					// Wait a bit for window to be fully initialized
+					time.Sleep(500 * time.Millisecond)
+					fyne.Do(func() {
+						controller.MainWindow.Hide()
+						log.Println("Tray mode: Window hidden")
+					})
 				}()
 			}
 		})
