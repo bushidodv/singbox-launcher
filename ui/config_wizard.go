@@ -1407,24 +1407,41 @@ func (state *WizardState) applyURLToParserConfig(input string) {
 	debugLog("applyURLToParserConfig: Classified lines: %d subscriptions, %d connections (took %v)",
 		len(subscriptions), len(connections), time.Since(splitStartTime))
 
-	// Сохраняем существующие локальные outbounds для каждого источника
+	// Сохраняем существующие локальные outbounds, tag_prefix и tag_postfix для каждого источника
 	// Используем source URL как ключ для сопоставления
 	existingOutboundsMap := make(map[string][]core.OutboundConfig)
+	existingTagPrefixMap := make(map[string]string)
+	existingTagPostfixMap := make(map[string]string)
 	for i, existingProxy := range parserConfig.ParserConfig.Proxies {
 		if existingProxy.Source != "" {
 			existingOutboundsMap[existingProxy.Source] = existingProxy.Outbounds
+			if existingProxy.TagPrefix != "" {
+				existingTagPrefixMap[existingProxy.Source] = existingProxy.TagPrefix
+			}
+			if existingProxy.TagPostfix != "" {
+				existingTagPostfixMap[existingProxy.Source] = existingProxy.TagPostfix
+			}
 		} else if i == 0 && len(existingProxy.Outbounds) > 0 {
 			// Если первый proxy не имел source, но имел outbounds, сохраняем их
 			// Это может быть случай, когда был только connections без source
 			existingOutboundsMap[""] = existingProxy.Outbounds
+			if existingProxy.TagPrefix != "" {
+				existingTagPrefixMap[""] = existingProxy.TagPrefix
+			}
+			if existingProxy.TagPostfix != "" {
+				existingTagPostfixMap[""] = existingProxy.TagPostfix
+			}
 		}
 	}
 
 	// Создаем новый массив ProxySource
 	newProxies := make([]core.ProxySource, 0)
 
+	// Автоматически добавляем tag_prefix с порядковым номером только если подписок несколько
+	autoAddPrefix := len(subscriptions) > 1
+
 	// Создаем отдельный ProxySource для каждой подписки
-	for _, sub := range subscriptions {
+	for idx, sub := range subscriptions {
 		proxySource := core.ProxySource{
 			Source: sub,
 		}
@@ -1432,6 +1449,20 @@ func (state *WizardState) applyURLToParserConfig(input string) {
 		if existingOutbounds, ok := existingOutboundsMap[sub]; ok {
 			proxySource.Outbounds = existingOutbounds
 			debugLog("applyURLToParserConfig: Restored %d local outbounds for subscription: %s", len(existingOutbounds), sub)
+		}
+		// Восстанавливаем tag_prefix, если он был установлен для этого источника
+		if existingTagPrefix, ok := existingTagPrefixMap[sub]; ok {
+			proxySource.TagPrefix = existingTagPrefix
+			debugLog("applyURLToParserConfig: Restored tag_prefix '%s' for subscription: %s", existingTagPrefix, sub)
+		} else if autoAddPrefix {
+			// Автоматически добавляем tag_prefix с порядковым номером для новых подписок (только если подписок несколько)
+			proxySource.TagPrefix = fmt.Sprintf("%d — ", idx+1)
+			debugLog("applyURLToParserConfig: Added automatic tag_prefix '%s' for subscription: %s", proxySource.TagPrefix, sub)
+		}
+		// Восстанавливаем tag_postfix, если он был установлен для этого источника
+		if existingTagPostfix, ok := existingTagPostfixMap[sub]; ok {
+			proxySource.TagPostfix = existingTagPostfix
+			debugLog("applyURLToParserConfig: Restored tag_postfix '%s' for subscription: %s", existingTagPostfix, sub)
 		}
 		newProxies = append(newProxies, proxySource)
 	}
