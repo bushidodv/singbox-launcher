@@ -61,19 +61,11 @@ func ShowConfigWizard(parent fyne.Window, controller *core.AppController) {
 	loadedConfig, err := loadConfigFromFile(state)
 	if err != nil {
 		errorLog("ConfigWizard: Failed to load config: %v", err)
-		// Показываем ошибку, но продолжаем работу с дефолтными значениями
 		dialog.ShowError(fmt.Errorf("Failed to load existing config: %w", err), wizardWindow)
 	}
 	if !loadedConfig {
-		if state.TemplateData != nil && state.TemplateData.ParserConfig != "" {
-			if state.ParserConfigEntry != nil {
-				state.parserConfigUpdating = true
-				state.ParserConfigEntry.SetText(state.TemplateData.ParserConfig)
-				state.parserConfigUpdating = false
-				state.previewNeedsParse = true
-			}
-		} else {
-			// Нет конфига и нет шаблона - показываем ошибку и закрываем визард
+		// Если не загрузили ни из шаблона, ни из config.json - показываем ошибку
+		if state.TemplateData == nil || state.TemplateData.ParserConfig == "" {
 			dialog.ShowError(fmt.Errorf("No config found and template file (bin/config_template.json) is missing or invalid.\nPlease create config_template.json or ensure config.json exists."), wizardWindow)
 			wizardWindow.Close()
 			return
@@ -820,6 +812,60 @@ func (state *WizardState) nextBackupPath(path string) string {
 
 // loadConfigFromFile загружает данные из существующего config.json
 func loadConfigFromFile(state *WizardState) (bool, error) {
+	// Если есть шаблон с ParserConfig, используем его outbounds, но proxies берем из config.json
+	if state.TemplateData != nil && state.TemplateData.ParserConfig != "" {
+		infoLog("ConfigWizard: Using ParserConfig from template for outbounds")
+		// Парсим ParserConfig из шаблона
+		var templateParserConfig core.ParserConfig
+		if err := json.Unmarshal([]byte(state.TemplateData.ParserConfig), &templateParserConfig); err != nil {
+			errorLog("ConfigWizard: Failed to parse ParserConfig from template: %v", err)
+			// Fallback to config.json if template parsing fails
+		} else {
+			// Проверяем наличие config.json для получения proxies
+			var configParserConfig *core.ParserConfig
+			if _, err := os.Stat(state.Controller.ConfigPath); err == nil {
+				// config.json существует - берем proxies оттуда
+				configParserConfig, err = core.ExtractParserConfig(state.Controller.ConfigPath)
+				if err != nil {
+					infoLog("ConfigWizard: Failed to extract ParserConfig from config.json, using template proxies: %v", err)
+				}
+			}
+
+			// Объединяем: outbounds из шаблона, proxies из config.json (если есть)
+			if configParserConfig != nil && len(configParserConfig.ParserConfig.Proxies) > 0 {
+				// Используем proxies из config.json
+				templateParserConfig.ParserConfig.Proxies = configParserConfig.ParserConfig.Proxies
+				infoLog("ConfigWizard: Using proxies from config.json, outbounds from template")
+			} else {
+				infoLog("ConfigWizard: Using proxies from template (config.json not found or empty)")
+			}
+
+			state.ParserConfig = &templateParserConfig
+
+			// Заполняем поле URL - объединяем Source и Connections
+			if len(templateParserConfig.ParserConfig.Proxies) > 0 {
+				proxySource := templateParserConfig.ParserConfig.Proxies[0]
+				lines := make([]string, 0)
+				if proxySource.Source != "" {
+					lines = append(lines, proxySource.Source)
+				}
+				lines = append(lines, proxySource.Connections...)
+				state.VLESSURLEntry.SetText(strings.Join(lines, "\n"))
+			}
+
+			parserConfigJSON, err := serializeParserConfig(&templateParserConfig)
+			if err != nil {
+				errorLog("ConfigWizard: Failed to serialize ParserConfig: %v", err)
+				return false, err
+			}
+
+			state.parserConfigUpdating = true
+			state.ParserConfigEntry.SetText(string(parserConfigJSON))
+			state.parserConfigUpdating = false
+			return true, nil
+		}
+	}
+
 	// Проверяем наличие config.json
 	if _, err := os.Stat(state.Controller.ConfigPath); os.IsNotExist(err) {
 		// Конфиг не существует - оставляем значения по умолчанию
@@ -827,7 +873,7 @@ func loadConfigFromFile(state *WizardState) (bool, error) {
 		return false, nil
 	}
 
-	// Извлекаем ParserConfig
+	// Извлекаем ParserConfig из config.json (fallback)
 	parserConfig, err := core.ExtractParserConfig(state.Controller.ConfigPath)
 	if err != nil {
 		// Если не удалось извлечь - оставляем значения по умолчанию
@@ -1379,7 +1425,8 @@ func (state *WizardState) applyURLToParserConfig(input string) {
 			time.Since(parseStartTime), err)
 		return
 	}
-	debugLog("applyURLToParserConfig: Parsed ParserConfig in %v", time.Since(parseStartTime))
+	debugLog("applyURLToParserConfig: Parsed ParserConfig in %v (outbounds: %d)",
+		time.Since(parseStartTime), len(parserConfig.ParserConfig.Outbounds))
 
 	// Разделяем подписки и прямые ссылки
 	splitStartTime := time.Now()
@@ -1428,8 +1475,8 @@ func (state *WizardState) applyURLToParserConfig(input string) {
 			time.Since(serializeStartTime), err)
 		return
 	}
-	debugLog("applyURLToParserConfig: Serialized ParserConfig in %v (result length: %d bytes)",
-		time.Since(serializeStartTime), len(serialized))
+	debugLog("applyURLToParserConfig: Serialized ParserConfig in %v (result length: %d bytes, outbounds before: %d)",
+		time.Since(serializeStartTime), len(serialized), len(parserConfig.ParserConfig.Outbounds))
 
 	// Обновляем UI безопасно из любого потока
 	safeFyneDo(state.Window, func() {

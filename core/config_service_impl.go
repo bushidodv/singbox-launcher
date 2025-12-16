@@ -245,12 +245,11 @@ func (svc *ConfigService) ProcessProxySource(proxySource ProxySource, tagCounts 
 func (svc *ConfigService) GenerateSelector(allNodes []*parsers.ParsedNode, outboundConfig OutboundConfig) (string, error) {
 	// Filter nodes based on filters (version 3)
 	filterMap := outboundConfig.Filters
-	filteredNodes := filterNodesForSelector(allNodes, filterMap)
+	log.Printf("Parser: GenerateSelector for '%s' (type: %s): filters=%v, addOutbounds=%v, allNodes=%d",
+		outboundConfig.Tag, outboundConfig.Type, filterMap, outboundConfig.AddOutbounds, len(allNodes))
 
-	if len(filteredNodes) == 0 {
-		log.Printf("Parser: No nodes matched filter for selector %s", outboundConfig.Tag)
-		return "", nil
-	}
+	filteredNodes := filterNodesForSelector(allNodes, filterMap)
+	log.Printf("Parser: filterNodesForSelector returned %d nodes for '%s'", len(filteredNodes), outboundConfig.Tag)
 
 	// Build outbounds list with unique tags
 	outboundsList := make([]string, 0)
@@ -282,6 +281,12 @@ func (svc *ConfigService) GenerateSelector(allNodes []*parsers.ParsedNode, outbo
 			duplicateCountInSelector++
 			log.Printf("Parser: Skipping duplicate tag '%s' in filtered nodes for selector '%s'", node.Tag, outboundConfig.Tag)
 		}
+	}
+
+	// Check if we have any outbounds at all (addOutbounds + filteredNodes)
+	if len(outboundsList) == 0 {
+		log.Printf("Parser: No outbounds (neither addOutbounds nor filteredNodes) for %s '%s'", outboundConfig.Type, outboundConfig.Tag)
+		return "", nil
 	}
 
 	if duplicateCountInSelector > 0 {
@@ -503,6 +508,13 @@ func (svc *ConfigService) GenerateNodeJSON(node *parsers.ParsedNode) (string, er
 func filterNodesForSelector(allNodes []*parsers.ParsedNode, filter interface{}) []*parsers.ParsedNode {
 	if filter == nil {
 		return allNodes // No filter, return all nodes
+	}
+
+	// Check if filter is an empty map - treat as no filter
+	if filterMap, ok := filter.(map[string]interface{}); ok {
+		if len(filterMap) == 0 {
+			return allNodes // Empty filter object means no filter, return all nodes
+		}
 	}
 
 	filtered := make([]*parsers.ParsedNode, 0)
