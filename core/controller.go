@@ -259,8 +259,14 @@ func NewAppController(appIconData, greyIconData, greenIconData, redIconData []by
 	ac.AutoUpdateEnabled = true
 	ac.AutoUpdateFailedAttempts = 0
 
-	// Start auto-update goroutine
-	go ac.startAutoUpdateLoop()
+	// Check if config file exists before starting auto-update
+	if _, err := os.Stat(ac.ConfigPath); os.IsNotExist(err) {
+		log.Printf("Auto-update: Config file does not exist (%s), auto-update disabled", ac.ConfigPath)
+		ac.AutoUpdateEnabled = false
+	} else {
+		// Start auto-update goroutine only if config exists
+		go ac.startAutoUpdateLoop()
+	}
 
 	return ac, nil
 }
@@ -315,6 +321,12 @@ func (ac *AppController) UpdateUI() {
 
 // GracefulExit performs a graceful shutdown of the application.
 func (ac *AppController) GracefulExit() {
+	// Cancel context to signal all goroutines to stop
+	if ac.cancelFunc != nil {
+		ac.cancelFunc()
+		log.Println("GracefulExit: Context cancelled, signalling goroutines to stop")
+	}
+
 	// Stop any pending menu update timer
 	ac.TrayMenuUpdateMutex.Lock()
 	if ac.TrayMenuUpdateTimer != nil {
@@ -1187,10 +1199,9 @@ func (ac *AppController) startAutoUpdateLoop() {
 
 		// Check if auto-update is enabled
 		ac.AutoUpdateMutex.Lock()
-		enabled := ac.AutoUpdateEnabled
 		ac.AutoUpdateMutex.Unlock()
-
-		if !enabled {
+		if !ac.AutoUpdateEnabled {
+			ac.AutoUpdateMutex.Unlock()
 			// Auto-update is stopped, wait and check again
 			select {
 			case <-ac.ctx.Done():
@@ -1199,6 +1210,7 @@ func (ac *AppController) startAutoUpdateLoop() {
 				continue
 			}
 		}
+		ac.AutoUpdateMutex.Unlock()
 
 		// Calculate check interval from config
 		checkInterval, err := ac.calculateAutoUpdateInterval()
