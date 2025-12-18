@@ -27,7 +27,7 @@ Cross-platform GUI launcher for [sing-box](https://github.com/SagerNet/sing-box)
   - [Config Template (config_template.json)](#config-template-config_templatejson)
   - [Enabling Clash API](#enabling-clash-api)
   - [Subscription Parser Configuration](#subscription-parser-configuration)
-- [🔄 Subscription Parser - Detailed Logic](#-subscription-parser---detailed-logic)
+- [🔄 Subscription Parser](#-subscription-parser)
 - [🏗️ Project Architecture](#️-project-architecture)
 - [🐛 Troubleshooting](#-troubleshooting)
 - [🔁 Auto-restart & Stability](#-auto-restart--stability)
@@ -86,7 +86,7 @@ This launcher solves all of that. Everything is controlled from one clean GUI:
 - 📝 **Full access to `config.json` inside the launcher**  
   (edit → save → sing-box restarts automatically)
 - 🔄 **Auto-parsing of any subscription type**  
-  (vless / vmess / trojan / ss / hysteria / tuic)  
+  (vless / vmess / trojan / ss / hysteria / hysteria2 / tuic)  
   + filters by tags and regex
 - 🌐 **Server selection with ping via Clash Meta API**  
 - 🔧 **Diagnostics tools**: IP-check, STUN test, process killer  
@@ -230,7 +230,7 @@ The Config Wizard provides a visual interface for configuring sing-box without m
 **Wizard Tabs:**
 
 1. **VLESS Sources & ParserConfig**
-   - Enter subscription URL or direct links (vless://, vmess://, trojan://, ss://) and validate connectivity
+   - Enter subscription URL or direct links (vless://, vmess://, trojan://, ss://, hysteria2://) and validate connectivity
    - Supports both subscription URLs and direct links (can be combined, separated by line breaks)
    - Configure ParserConfig JSON with visual editor
    - Preview generated outbounds
@@ -313,7 +313,7 @@ The `config_template.json` file provides a template for the Config Wizard and de
 
 **Template Directives:**
 
-- `/** @ParcerConfig ... */` - Default parser configuration block
+- `/** @ParserConfig ... */` - Default parser configuration block
 - `/** @SelectableRule ... */` - Defines a selectable routing rule
   - `@label` - Display name for the rule (shown in wizard)
   - `@description` - Description shown in info tooltip (optional)
@@ -345,7 +345,7 @@ You can create your own `config_template.json` file to customize the rules avail
 1. **Start with the default template**: Download the default template using the **"Download Config Template"** button
 2. **Edit the template**: Modify `config_template.json` in the `bin/` folder
 3. **Add custom rules**: Use the `/** @SelectableRule ... */` syntax to add your own routing rules
-4. **Customize ParserConfig**: Modify the `/** @ParcerConfig ... */` block to set default subscription settings
+4. **Customize ParserConfig**: Modify the `/** @ParserConfig ... */` block to set default subscription settings
 5. **Save and use**: The wizard will automatically use your custom template
 
 **Template Structure:**
@@ -382,10 +382,10 @@ For automatic configuration updates from subscriptions, add at the beginning of 
 
 ```json
 {
-  /** @ParcerConfig
+  /** @ParserConfig
   {
     "ParserConfig": {
-      "version": 2,
+      "version": 3,
       "proxies": [
         {
           "source": "https://your-subscription-url.com/subscription",
@@ -400,11 +400,11 @@ For automatic configuration updates from subscriptions, add at the beginning of 
           "tag": "proxy-out",
           "type": "selector",
           "options": { "interrupt_exist_connections": true },
-          "outbounds": {
-            "proxies": { "tag": "!/(🇷🇺)/i" },
-            "addOutbounds": ["direct-out"],
-            "preferredDefault": { "tag": "/🇳🇱/i" }
+          "filters": {
+            "tag": "!/(🇷🇺)/i"
           },
+          "addOutbounds": ["direct-out"],
+          "preferredDefault": { "tag": "/🇳🇱/i" },
           "comment": "Proxy group for international connections"
         }
       ],
@@ -422,201 +422,22 @@ For automatic configuration updates from subscriptions, add at the beginning of 
 
 **Note:** You can configure all of this visually via the Config Wizard (recommended for beginners). Manual JSON editing is for advanced users.
 
-## 🔄 Subscription Parser - Detailed Logic
+## 🔄 Subscription Parser
 
-The subscription parser is a built-in feature that automatically updates the proxy server list in `config.json` from subscriptions (subscription URLs).
+The subscription parser automatically updates the proxy server list in `config.json` from subscriptions.
 
-### How It Works
+### Overview
 
-#### 1. Parser Configuration
+The parser reads the `/** @ParserConfig ... */` block at the beginning of `config.json`, downloads subscriptions, filters nodes, and generates selectors according to your configuration.
 
-At the beginning of the `config.json` file, there should be a `/** @ParcerConfig ... */` block with JSON configuration.
+**Key Features:**
+- Supports multiple subscription URLs and direct links (vless://, vmess://, trojan://, ss://, hysteria2://)
+- Flexible filtering by tags, protocols, and other parameters
+- Automatic grouping into selectors
+- Automatic configuration reload based on time intervals
+- Automatic migration from older configuration versions
 
-**Version 2 (Current)**: The `version` field is now inside `ParserConfig`. Automatic configuration reload is supported via the `parser` object.
-
-**Backward Compatibility**: Version 1 format (with `version` at top level) is automatically migrated to version 2.
-
-```json
-{
-  /** @ParcerConfig
-  {
-    "ParserConfig": {
-      "version": 2,
-      "proxies": [
-        {
-          "source": "https://your-subscription-url.com/subscription",
-          "connections": [
-            "vless://uuid@server.com:443?security=reality&...#ServerName",
-            "vmess://eyJ2IjoiMiIsInBzIjoi..."
-          ],
-          "skip": [ { "tag": "!/🇷🇺/i" } ]
-        }
-      ],
-      "outbounds": [
-        {
-          "tag": "proxy-out",
-          "type": "selector",
-          "options": { "interrupt_exist_connections": true },
-          "outbounds": {
-            "proxies": { "tag": "!/(🇷🇺)/i" },
-            "addOutbounds": ["direct-out"],
-            "preferredDefault": { "tag": "/🇳🇱/i" }
-          },
-          "comment": "Proxy group for international connections"
-        }
-      ],
-      "parser": {
-        "reload": "4h"
-      }
-    }
-  }
-  */
-}
-```
-
-#### 2. Update Process
-
-When you click the **"Update Config"** button in the "Core" tab (or use the Config Wizard):
-
-1. **Reading Configuration**
-   - Parser finds the `@ParcerConfig` block in `config.json`
-   - Extracts subscription URLs from the `proxies[].source` field
-   - Extracts direct links from the `proxies[].connections` field
-
-2. **Loading Subscriptions**
-   - For each URL from `proxies[].source`:
-     - Downloads subscription content (Base64 and plain text supported)
-     - Decodes and parses the proxy server list
-   - For each direct link from `proxies[].connections`:
-     - Parses the direct link (vless://, vmess://, trojan://, ss://) and adds it to the proxy list
-
-3. **Supported Protocols**
-   - ✅ VLESS
-   - ✅ VMess
-   - ✅ Trojan
-   - ✅ Shadowsocks (SS)
-
-4. **Information Extraction**
-   - From each URI extracts:
-     - **Tag**: left part of comment before `|` (e.g., `🇳🇱Netherlands`)
-     - **Comment**: entire text after `#` in URI
-     - **Connection parameters**: server, port, UUID, TLS settings, etc.
-
-5. **Node Filtering**
-
-   **`skip` filter** (at subscription level):
-   - If a node matches any filter from `skip` - it is skipped
-   - Example: `"skip": [ { "tag": "!/🇷🇺/i" } ]` - skip all non-Russian proxies
-   - Example: `"skip": [ { "flow": "/xtls-rprx-vision-udp443/i" } ]` - skip nodes with specific flow parameter
-   
-   **Note:** Nodes with `flow: "xtls-rprx-vision-udp443"` are automatically converted to compatible format:
-   - `flow: "xtls-rprx-vision"` + `packet_encoding: "xudp"` (compatible with sing-box)
-   - This conversion happens before skip filters are applied, so you can still filter by original flow value
-   - Example converted outbound:
-     ```json
-     {
-       "type": "vless",
-       "server": "example.com",
-       "server_port": 443,
-       "uuid": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-       "flow": "xtls-rprx-vision",
-       "packet_encoding": "xudp",
-       "tls": { ... }
-     }
-     ```
-   
-   **`proxies` filter** (at selector level):
-   - Determines which nodes will be included in a specific selector
-   - Example: `"proxies": { "tag": "!/(🇷🇺)/i" }` - all except Russian
-
-   **Supported filter fields:**
-   - `tag` - tag name (case-sensitive, with emoji)
-   - `host` - server hostname
-   - `label` - original string after `#` in URI
-   - `scheme` - protocol (`vless`, `vmess`, `trojan`, `ss`)
-   - `fragment` - URI fragment (equals `label`)
-   - `comment` - right part of `label` after `|`
-   - `flow` - flow parameter (e.g., `xtls-rprx-vision`, `xtls-rprx-vision-udp443`)
-
-   **Pattern formats:**
-   - `"literal"` - exact match (case-sensitive)
-   - `"!literal"` - negation (does NOT match)
-   - `"/regex/i"` - regular expression with `i` flag (case-insensitive)
-   - `"!/regex/i"` - negated regular expression
-
-6. **Grouping into Selectors**
-
-   For each object in `outbounds[]`, a selector is created:
-   
-   - **`tag`**: selector name (used in UI and routing)
-   - **`type`**: always `"selector"` for selectors
-   - **`outbounds.proxies`**: filter for node selection (OR between objects, AND inside object)
-   - **`outbounds.addOutbounds`**: additional tags added to the beginning of the list (e.g., `["direct-out"]`)
-   - **`outbounds.preferredDefault`**: filter to determine default proxy
-   - **`options`**: additional fields (e.g., `interrupt_exist_connections: true`)
-   - **`comment`**: comment displayed before JSON selector
-
-7. **Writing Result**
-
-   Parser finds in `config.json` the block between markers:
-   ```
-   /** @ParserSTART */
-   ... proxies and selectors will be here ...
-   /** @ParserEND */
-   ```
-   
-   And replaces it with:
-   - List of all filtered proxy servers in JSON format
-   - Selectors with proxy grouping according to specified rules
-   - Comments from original URIs
-
-### Important Notes
-
-1. **Stop sing-box before updating**
-   - Clash API may react to intermediate file
-   - Use "Stop VPN" button before "Update Config"
-
-2. **Markers are required**
-   - `/** @ParserSTART */` and `/** @ParserEND */` must be in `config.json`
-   - Without them, parser doesn't know where to insert the result
-
-3. **Automatic normalization**
-   - Incorrect flag `🇪🇳` is automatically replaced with `🇬🇧`
-   - Normalization logic can be extended in parser code
-
-4. **UI Integration**
-   - "Clash API" tab automatically picks up selector list
-   - By default, selector from `route.final` is selected (if matches)
-   - Can be switched via dropdown list
-
-5. **Multiple Subscriptions**
-   - Multiple subscriptions can be specified in `proxies[]` array
-   - All nodes will be merged and filtered together
-
-### Automatic Configuration Reload (Version 2)
-
-Starting from version 2, you can configure automatic periodic updates of your configuration:
-
-```json
-"parser": {
-  "reload": "4h",
-  "last_updated": "2024-01-15T14:30:00Z"
-}
-```
-
-- **`reload`** (optional): Interval for automatic updates (e.g., `"4h"`, `"30m"`, `"1h30m"`). If not specified, automatic updates are disabled.
-- **`last_updated`** (optional): Timestamp of the last successful update (RFC3339 format, UTC). Automatically updated by the launcher.
-
-The launcher checks every minute if an update is needed based on the `reload` interval. If enough time has passed since `last_updated`, it automatically triggers a configuration update.
-
-**Example:**
-```json
-"parser": {
-  "reload": "4h"  // Update every 4 hours
-}
-```
-
-**📖 For detailed parser configuration, see [docs/ParserConfig.md](docs/ParserConfig.md)**
+**📖 For detailed parser configuration documentation, see [docs/ParserConfig.md](docs/ParserConfig.md)**
 
 ## 🏗️ Project Architecture
 

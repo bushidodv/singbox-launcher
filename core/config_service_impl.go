@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,6 +16,78 @@ import (
 // MaxNodesPerSubscription limits the maximum number of nodes parsed from a single subscription
 // This prevents memory issues with very large subscriptions
 const MaxNodesPerSubscription = 500
+
+// OutboundGenerationResult contains the result of outbound generation with statistics
+type OutboundGenerationResult struct {
+	OutboundsJSON        []string // Array of generated JSON strings (nodes + selectors)
+	NodesCount           int      // Number of generated nodes
+	LocalSelectorsCount  int      // Number of local selectors
+	GlobalSelectorsCount int      // Number of global selectors
+}
+
+// applyTagPrefixPostfix applies prefix and postfix to a node tag if specified in ProxySource.
+// If tagMask is set, it replaces the entire tag and ignores prefix/postfix.
+// Supports variable substitution in prefix, postfix, and mask.
+// Returns the modified tag.
+func applyTagPrefixPostfix(node *parsers.ParsedNode, tagPrefix, tagPostfix, tagMask string, nodeNum int) string {
+	// If tag_mask is set, use it to replace the entire tag (ignores prefix/postfix)
+	if tagMask != "" {
+		return replaceTagVariables(tagMask, node, nodeNum)
+	}
+
+	tag := node.Tag
+
+	// Replace variables in prefix
+	if tagPrefix != "" {
+		prefix := replaceTagVariables(tagPrefix, node, nodeNum)
+		tag = prefix + tag
+	}
+
+	// Replace variables in postfix
+	if tagPostfix != "" {
+		postfix := replaceTagVariables(tagPostfix, node, nodeNum)
+		tag = tag + postfix
+	}
+
+	return tag
+}
+
+// replaceTagVariables replaces variables in tag prefix/postfix with actual values from node.
+// Supported variables:
+//   - {$tag} - original node tag
+//   - {$scheme} or {$protocol} - protocol (vless, vmess, trojan, ss, hysteria2)
+//   - {$server} - server address
+//   - {$port} - server port (number)
+//   - {$label} - label from URL (fragment after #)
+//   - {$comment} - comment
+//   - {$num} - node sequential number starting from 1
+func replaceTagVariables(template string, node *parsers.ParsedNode, nodeNum int) string {
+	result := template
+
+	// Replace {$tag}
+	result = strings.ReplaceAll(result, "{$tag}", node.Tag)
+
+	// Replace {$scheme} or {$protocol}
+	result = strings.ReplaceAll(result, "{$scheme}", node.Scheme)
+	result = strings.ReplaceAll(result, "{$protocol}", node.Scheme)
+
+	// Replace {$server}
+	result = strings.ReplaceAll(result, "{$server}", node.Server)
+
+	// Replace {$port}
+	result = strings.ReplaceAll(result, "{$port}", strconv.Itoa(node.Port))
+
+	// Replace {$label}
+	result = strings.ReplaceAll(result, "{$label}", node.Label)
+
+	// Replace {$comment}
+	result = strings.ReplaceAll(result, "{$comment}", node.Comment)
+
+	// Replace {$num}
+	result = strings.ReplaceAll(result, "{$num}", strconv.Itoa(nodeNum))
+
+	return result
+}
 
 // MakeTagUnique makes a tag unique by appending a number if it already exists in tagCounts.
 // Updates tagCounts map and returns the unique tag.
@@ -138,6 +211,8 @@ func (svc *ConfigService) ProcessProxySource(proxySource ProxySource, tagCounts 
 					}
 
 					if node != nil {
+						// Apply prefix, postfix, or mask to tag if specified (with variable substitution)
+						node.Tag = applyTagPrefixPostfix(node, proxySource.TagPrefix, proxySource.TagPostfix, proxySource.TagMask, nodesFromThisSource+1)
 						node.Tag = MakeTagUnique(node.Tag, tagCounts, "Parser")
 						nodes = append(nodes, node)
 						nodesFromThisSource++
@@ -167,6 +242,8 @@ func (svc *ConfigService) ProcessProxySource(proxySource ProxySource, tagCounts 
 						time.Since(parseStartTime), err)
 					log.Printf("Parser: Warning: Failed to parse direct link: %v", err)
 				} else if node != nil {
+					// Apply prefix, postfix, or mask to tag if specified (with variable substitution)
+					node.Tag = applyTagPrefixPostfix(node, proxySource.TagPrefix, proxySource.TagPostfix, proxySource.TagMask, nodesFromThisSource+1)
 					node.Tag = MakeTagUnique(node.Tag, tagCounts, "Parser")
 					nodes = append(nodes, node)
 					nodesFromThisSource++
@@ -215,6 +292,8 @@ func (svc *ConfigService) ProcessProxySource(proxySource ProxySource, tagCounts 
 		}
 
 		if node != nil {
+			// Apply prefix, postfix, or mask to tag if specified (with variable substitution)
+			node.Tag = applyTagPrefixPostfix(node, proxySource.TagPrefix, proxySource.TagPostfix, proxySource.TagMask, nodesFromThisSource+1)
 			node.Tag = MakeTagUnique(node.Tag, tagCounts, "Parser")
 			nodes = append(nodes, node)
 			nodesFromThisSource++
@@ -239,27 +318,28 @@ func (svc *ConfigService) ProcessProxySource(proxySource ProxySource, tagCounts 
 }
 
 // GenerateSelector generates JSON string for a selector from filtered nodes.
-// Filters nodes based on outboundConfig.Outbounds.Proxies, adds addOutbounds,
+// Filters nodes based on outboundConfig.Filters, adds addOutbounds,
 // determines default outbound from preferredDefault if specified, and builds
 // the selector JSON with correct field order.
 func (svc *ConfigService) GenerateSelector(allNodes []*parsers.ParsedNode, outboundConfig OutboundConfig) (string, error) {
-	// Filter nodes based on outbounds.proxies
-	filteredNodes := filterNodesForSelector(allNodes, outboundConfig.Outbounds.Proxies)
+	// Filter nodes based on filters (version 3)
+	filterMap := outboundConfig.Filters
+	log.Printf("Parser: GenerateSelector for '%s' (type: %s): filters=%v, addOutbounds=%v, allNodes=%d",
+		outboundConfig.Tag, outboundConfig.Type, filterMap, outboundConfig.AddOutbounds, len(allNodes))
 
-	if len(filteredNodes) == 0 {
-		log.Printf("Parser: No nodes matched filter for selector %s", outboundConfig.Tag)
-		return "", nil
-	}
+	filteredNodes := filterNodesForSelector(allNodes, filterMap)
+	log.Printf("Parser: filterNodesForSelector returned %d nodes for '%s'", len(filteredNodes), outboundConfig.Tag)
 
 	// Build outbounds list with unique tags
 	outboundsList := make([]string, 0)
 	seenTags := make(map[string]bool)
 	duplicateCountInSelector := 0
 
-	// Add addOutbounds first
-	if len(outboundConfig.Outbounds.AddOutbounds) > 0 {
-		log.Printf("Parser: Adding %d addOutbounds to selector '%s'", len(outboundConfig.Outbounds.AddOutbounds), outboundConfig.Tag)
-		for _, tag := range outboundConfig.Outbounds.AddOutbounds {
+	// Add addOutbounds first (version 3)
+	addOutboundsList := outboundConfig.AddOutbounds
+	if len(addOutboundsList) > 0 {
+		log.Printf("Parser: Adding %d addOutbounds to selector '%s'", len(addOutboundsList), outboundConfig.Tag)
+		for _, tag := range addOutboundsList {
 			if !seenTags[tag] {
 				outboundsList = append(outboundsList, tag)
 				seenTags[tag] = true
@@ -282,16 +362,23 @@ func (svc *ConfigService) GenerateSelector(allNodes []*parsers.ParsedNode, outbo
 		}
 	}
 
+	// Check if we have any outbounds at all (addOutbounds + filteredNodes)
+	if len(outboundsList) == 0 {
+		log.Printf("Parser: No outbounds (neither addOutbounds nor filteredNodes) for %s '%s'", outboundConfig.Type, outboundConfig.Tag)
+		return "", nil
+	}
+
 	if duplicateCountInSelector > 0 {
 		log.Printf("Parser: Removed %d duplicate tags from selector '%s' outbounds list", duplicateCountInSelector, outboundConfig.Tag)
 	}
 	log.Printf("Parser: Selector '%s' will have %d unique outbounds", outboundConfig.Tag, len(outboundsList))
 
-	// Determine default - only if preferredDefault is specified in config
+	// Determine default - only if preferredDefault is specified in config (version 3)
+	preferredDefaultMap := outboundConfig.PreferredDefault
 	defaultTag := ""
-	if len(outboundConfig.Outbounds.PreferredDefault) > 0 {
+	if len(preferredDefaultMap) > 0 {
 		// Find first node matching preferredDefault filter
-		preferredFilter := convertFilterToStringMap(outboundConfig.Outbounds.PreferredDefault)
+		preferredFilter := convertFilterToStringMap(preferredDefaultMap)
 		for _, node := range filteredNodes {
 			if matchesFilter(node, preferredFilter) {
 				defaultTag = node.Tag
@@ -419,11 +506,21 @@ func (svc *ConfigService) GenerateNodeJSON(node *parsers.ParsedNode) (string, er
 		parts = append(parts, fmt.Sprintf(`"password":%q`, node.UUID))
 	} else if node.Scheme == "ss" {
 		// Extract method and password from outbound
+		// Use json.Marshal to properly escape strings for JSON (handles binary data correctly)
+		// This prevents invalid \xXX escape sequences that JSON doesn't support
 		if method, ok := node.Outbound["method"].(string); ok && method != "" {
-			parts = append(parts, fmt.Sprintf(`"method":%q`, method))
+			methodJSON, err := json.Marshal(method)
+			if err != nil {
+				return "", fmt.Errorf("failed to marshal shadowsocks method: %w", err)
+			}
+			parts = append(parts, fmt.Sprintf(`"method":%s`, string(methodJSON)))
 		}
 		if password, ok := node.Outbound["password"].(string); ok && password != "" {
-			parts = append(parts, fmt.Sprintf(`"password":%q`, password))
+			passwordJSON, err := json.Marshal(password)
+			if err != nil {
+				return "", fmt.Errorf("failed to marshal shadowsocks password: %w", err)
+			}
+			parts = append(parts, fmt.Sprintf(`"password":%s`, string(passwordJSON)))
 		}
 	}
 
@@ -500,6 +597,13 @@ func (svc *ConfigService) GenerateNodeJSON(node *parsers.ParsedNode) (string, er
 func filterNodesForSelector(allNodes []*parsers.ParsedNode, filter interface{}) []*parsers.ParsedNode {
 	if filter == nil {
 		return allNodes // No filter, return all nodes
+	}
+
+	// Check if filter is an empty map - treat as no filter
+	if filterMap, ok := filter.(map[string]interface{}); ok {
+		if len(filterMap) == 0 {
+			return allNodes // Empty filter object means no filter, return all nodes
+		}
 	}
 
 	filtered := make([]*parsers.ParsedNode, 0)
@@ -609,6 +713,124 @@ func matchesPattern(value, pattern string) bool {
 	return value == pattern
 }
 
+// GenerateOutboundsFromParserConfig processes ParserConfig and generates all outbounds.
+// Returns array of JSON strings: first all nodes, then local selectors (per source), then global selectors.
+// This function eliminates code duplication between UpdateConfigFromSubscriptions and parseAndPreview.
+func (svc *ConfigService) GenerateOutboundsFromParserConfig(
+	config *ParserConfig,
+	tagCounts map[string]int,
+	progressCallback func(float64, string),
+) (*OutboundGenerationResult, error) {
+	// Step 1: Process all proxy sources and collect nodes
+	allNodes := make([]*parsers.ParsedNode, 0)
+	nodesBySource := make(map[int][]*parsers.ParsedNode) // Map source index to its nodes
+
+	totalSources := len(config.ParserConfig.Proxies)
+	if progressCallback != nil {
+		progressCallback(10, fmt.Sprintf("Processing %d sources...", totalSources))
+	}
+
+	for i, proxySource := range config.ParserConfig.Proxies {
+		if progressCallback != nil {
+			progressCallback(10+float64(i)*30.0/float64(totalSources),
+				fmt.Sprintf("Processing source %d/%d...", i+1, totalSources))
+		}
+
+		nodesFromSource, err := svc.ProcessProxySource(proxySource, tagCounts, progressCallback, i, totalSources)
+		if err != nil {
+			log.Printf("GenerateOutboundsFromParserConfig: Error processing source %d/%d: %v", i+1, totalSources, err)
+			continue
+		}
+
+		if len(nodesFromSource) > 0 {
+			allNodes = append(allNodes, nodesFromSource...)
+			nodesBySource[i] = nodesFromSource
+		}
+	}
+
+	if len(allNodes) == 0 {
+		return nil, fmt.Errorf("no nodes parsed from any source")
+	}
+
+	// Step 2: Generate JSON for all nodes
+	if progressCallback != nil {
+		progressCallback(40, fmt.Sprintf("Generating JSON for %d nodes...", len(allNodes)))
+	}
+
+	selectorsJSON := make([]string, 0)
+	nodesCount := 0
+
+	for _, node := range allNodes {
+		nodeJSON, err := svc.GenerateNodeJSON(node)
+		if err != nil {
+			log.Printf("GenerateOutboundsFromParserConfig: Warning: Failed to generate JSON for node %s: %v", node.Tag, err)
+			continue
+		}
+		selectorsJSON = append(selectorsJSON, nodeJSON)
+		nodesCount++
+	}
+
+	// Step 3: Generate local selectors for each source (if they have local outbounds)
+	localSelectorsCount := 0
+	if progressCallback != nil {
+		progressCallback(60, "Generating local selectors...")
+	}
+
+	for i, proxySource := range config.ParserConfig.Proxies {
+		if len(proxySource.Outbounds) == 0 {
+			continue
+		}
+
+		sourceNodes, ok := nodesBySource[i]
+		if !ok || len(sourceNodes) == 0 {
+			continue
+		}
+
+		for _, outboundConfig := range proxySource.Outbounds {
+			selectorJSON, err := svc.GenerateSelector(sourceNodes, outboundConfig)
+			if err != nil {
+				log.Printf("GenerateOutboundsFromParserConfig: Warning: Failed to generate local selector %s for source %d: %v",
+					outboundConfig.Tag, i+1, err)
+				continue
+			}
+			if selectorJSON != "" {
+				selectorsJSON = append(selectorsJSON, selectorJSON)
+				localSelectorsCount++
+			}
+		}
+	}
+
+	// Step 4: Generate global selectors
+	globalSelectorsCount := 0
+	if progressCallback != nil {
+		progressCallback(80, "Generating global selectors...")
+	}
+
+	for _, outboundConfig := range config.ParserConfig.Outbounds {
+		selectorJSON, err := svc.GenerateSelector(allNodes, outboundConfig)
+		if err != nil {
+			log.Printf("GenerateOutboundsFromParserConfig: Warning: Failed to generate global selector %s: %v",
+				outboundConfig.Tag, err)
+			continue
+		}
+		if selectorJSON != "" {
+			selectorsJSON = append(selectorsJSON, selectorJSON)
+			globalSelectorsCount++
+		}
+	}
+
+	if progressCallback != nil {
+		progressCallback(100, "Generation complete")
+	}
+
+	return &OutboundGenerationResult{
+		OutboundsJSON:        selectorsJSON,
+		NodesCount:           nodesCount,
+		LocalSelectorsCount:  localSelectorsCount,
+		GlobalSelectorsCount: globalSelectorsCount,
+	}, nil
+}
+
 // UpdateConfigFromSubscriptions updates config.json by fetching subscriptions and parsing nodes.
 // This is the main entry point for configuration updates.
 // It extracts parser configuration, processes all proxy sources, generates outbound JSON,
@@ -636,94 +858,28 @@ func (svc *ConfigService) UpdateConfigFromSubscriptions() error {
 	// Small delay before starting to fetch subscriptions
 	time.Sleep(100 * time.Millisecond)
 
-	// Step 2: Load and parse subscriptions
-	allNodes := make([]*parsers.ParsedNode, 0)
-	successfulSubscriptions := 0
-	totalSubscriptions := len(config.ParserConfig.Proxies)
-
+	// Step 2: Generate all outbounds using unified function
 	// Map to track unique tags and their counts
 	tagCounts := make(map[string]int)
 	log.Printf("Parser: Initializing tag deduplication tracker")
 
-	updateParserProgress(ac, 20, fmt.Sprintf("Loading subscriptions (0/%d)...", totalSubscriptions))
-
-	for i, proxySource := range config.ParserConfig.Proxies {
-		progressCallback := func(p float64, s string) {
-			updateParserProgress(ac, p, s)
-		}
-
-		nodesFromThisSource, err := svc.ProcessProxySource(proxySource, tagCounts, progressCallback, i, totalSubscriptions)
-		if err != nil {
-			log.Printf("Parser: Error processing source %d/%d: %v", i+1, totalSubscriptions, err)
-			continue
-		}
-
-		if len(nodesFromThisSource) > 0 {
-			allNodes = append(allNodes, nodesFromThisSource...)
-			successfulSubscriptions++
-			log.Printf("Parser: Successfully parsed %d nodes from source %d/%d: %s", len(nodesFromThisSource), i+1, totalSubscriptions, proxySource.Source)
-		} else {
-			log.Printf("Parser: Warning: No valid nodes parsed from source %d/%d: %s", i+1, totalSubscriptions, proxySource.Source)
-		}
-
-		// Update progress after parsing source
-		progress := 20 + float64(i+1)*50.0/float64(totalSubscriptions)
-		updateParserProgress(ac, progress, fmt.Sprintf("Processed sources: %d/%d, nodes: %d", i+1, totalSubscriptions, len(allNodes)))
+	progressCallback := func(p float64, s string) {
+		updateParserProgress(ac, p, s)
 	}
 
-	// Check if we successfully loaded at least one subscription
-	if successfulSubscriptions == 0 {
-		updateParserProgress(ac, -1, "Error: failed to load any subscriptions")
-		return fmt.Errorf("failed to load any subscriptions - check internet connection and subscription URLs")
+	result, err := svc.GenerateOutboundsFromParserConfig(config, tagCounts, progressCallback)
+	if err != nil {
+		updateParserProgress(ac, -1, fmt.Sprintf("Error: %v", err))
+		return fmt.Errorf("failed to generate outbounds: %w", err)
 	}
-
-	log.Printf("Parser: Parsed %d nodes from subscriptions", len(allNodes))
 
 	// Log statistics about duplicates
 	LogDuplicateTagStatistics(tagCounts, "Parser")
 
-	updateParserProgress(ac, 70, fmt.Sprintf("Processed nodes: %d. Generating JSON...", len(allNodes)))
+	log.Printf("Parser: Generated %d nodes, %d local selectors, %d global selectors",
+		result.NodesCount, result.LocalSelectorsCount, result.GlobalSelectorsCount)
 
-	// Check if we have any nodes before proceeding
-	if len(allNodes) == 0 {
-		updateParserProgress(ac, -1, "Error: no nodes found in subscriptions")
-		return fmt.Errorf("no nodes parsed from subscriptions - check internet connection and subscription URLs")
-	}
-
-	// Step 3: Generate selectors
-	updateParserProgress(ac, 75, "Generating JSON for nodes...")
-
-	selectorsJSON := make([]string, 0)
-
-	// First, generate JSON for all nodes
-	for _, node := range allNodes {
-		nodeJSON, err := svc.GenerateNodeJSON(node)
-		if err != nil {
-			log.Printf("Parser: Warning: Failed to generate JSON for node %s: %v", node.Tag, err)
-			continue
-		}
-		selectorsJSON = append(selectorsJSON, nodeJSON)
-	}
-
-	// Check if we have any node JSON before generating selectors
-	if len(selectorsJSON) == 0 {
-		updateParserProgress(ac, -1, "Error: failed to generate JSON for nodes")
-		return fmt.Errorf("failed to generate JSON for any nodes")
-	}
-
-	// Then, generate selectors
-	updateParserProgress(ac, 85, "Generating selectors...")
-
-	for _, outboundConfig := range config.ParserConfig.Outbounds {
-		selectorJSON, err := svc.GenerateSelector(allNodes, outboundConfig)
-		if err != nil {
-			log.Printf("Parser: Warning: Failed to generate selector %s: %v", outboundConfig.Tag, err)
-			continue
-		}
-		if selectorJSON != "" {
-			selectorsJSON = append(selectorsJSON, selectorJSON)
-		}
-	}
+	selectorsJSON := result.OutboundsJSON
 
 	// Final check: ensure we have content to write
 	if len(selectorsJSON) == 0 {
@@ -735,28 +891,25 @@ func (svc *ConfigService) UpdateConfigFromSubscriptions() error {
 	updateParserProgress(ac, 90, "Writing to config file...")
 
 	content := strings.Join(selectorsJSON, "\n")
-	if err := writeToConfig(ac.ConfigPath, content); err != nil {
+	if err := writeToConfig(ac.ConfigPath, content, config); err != nil {
 		updateParserProgress(ac, -1, fmt.Sprintf("Write error: %v", err))
 		return fmt.Errorf("failed to write to config: %w", err)
 	}
 
 	log.Printf("Parser: Done! File %s successfully updated.", ac.ConfigPath)
-
-	// Update last_updated timestamp in @ParserConfig block
-	if err := UpdateLastUpdatedInConfig(ac.ConfigPath, time.Now().UTC()); err != nil {
-		log.Printf("Parser: Warning: Failed to update last_updated timestamp: %v", err)
-		// Don't fail the whole operation if timestamp update fails
-	} else {
-		log.Printf("Parser: Successfully updated last_updated timestamp")
-	}
+	log.Printf("Parser: Successfully updated last_updated timestamp")
 
 	updateParserProgress(ac, 100, "Configuration updated successfully!")
+
+	// Resume auto-update after successful update
+	ac.resumeAutoUpdate()
 
 	return nil
 }
 
 // writeToConfig writes content between @ParserSTART and @ParserEND markers
-func writeToConfig(configPath string, content string) error {
+// Also updates @ParserConfig block with last_updated timestamp in a single file write
+func writeToConfig(configPath string, content string, parserConfig *ParserConfig) error {
 	// Read config file
 	data, err := os.ReadFile(configPath)
 	if err != nil {
@@ -780,10 +933,37 @@ func writeToConfig(configPath string, content string) error {
 		return fmt.Errorf("invalid marker positions")
 	}
 
-	// Build new content
+	// Build new content with updated @ParserSTART/@ParserEND section
 	newContent := configStr[:startIdx+len(startMarker)] + "\n" + content + "\n" + configStr[endIdx:]
 
-	// Write to file
+	// Also update @ParserConfig block if parserConfig is provided
+	if parserConfig != nil {
+		// Update last_updated timestamp
+		parserConfig.ParserConfig.Parser.LastUpdated = time.Now().UTC().Format(time.RFC3339)
+
+		// Normalize config (ensures version is set, sets default reload to "4h" if missing)
+		NormalizeParserConfig(parserConfig, false)
+
+		// Find the @ParserConfig block using regex
+		pattern := regexp.MustCompile(`(/\*\*\s*@ParserConfig\s*\n)([\s\S]*?)(\*/)`)
+		matches := pattern.FindSubmatch([]byte(newContent))
+
+		if len(matches) >= 4 {
+			// Serialize parserConfig to JSON with indentation
+			outerJSON := map[string]interface{}{
+				"ParserConfig": parserConfig.ParserConfig,
+			}
+			finalJSON, err := json.MarshalIndent(outerJSON, "", "  ")
+			if err != nil {
+				return fmt.Errorf("failed to marshal outer @ParserConfig: %w", err)
+			}
+
+			parserConfigBlock := string(matches[1]) + string(finalJSON) + "\n" + string(matches[3])
+			newContent = pattern.ReplaceAllString(newContent, parserConfigBlock)
+		}
+	}
+
+	// Write to file (single write operation)
 	if err := os.WriteFile(configPath, []byte(newContent), 0644); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}

@@ -5,7 +5,7 @@
   /** @ParserConfig
     {
       "ParserConfig": {
-        "version": 2,
+        "version": 4,
         "proxies": [{ "source": "https://your-subscription-url-here" }],
         "outbounds": [
           {
@@ -17,23 +17,20 @@
               "tolerance": 100,
               "interrupt_exist_connections": true
             },
-            "outbounds": {
-              "proxies": { "tag": "!/(🇷🇺)/i" }
-            },
-			      "comment": "Proxy automated group for everything that should go through VPN"
-		      },
+            "filters": { "tag": "!/(🇷🇺)/i" },
+            "comment": "Proxy automated group for everything that should go through VPN"
+          },
           {
             "tag": "proxy-out",
             "type": "selector",
             "options": { "interrupt_exist_connections": true, "default": "auto-proxy-out"},
-            "outbounds": {
-            	"addOutbounds": ["direct-out","auto-proxy-out"],
-            	"proxies": { "tag": "!/(🇷🇺)/i" }
-            },
+            "filters": { "tag": "!/(🇷🇺)/i" },
+            "addOutbounds": ["direct-out","auto-proxy-out"],
             "comment": "Proxy group for everything that should go through VPN"
           },
           {
             "tag": "go-any-way-githubusercontent",
+            "wizard":"hide",
             "type": "urltest",
             "options": {
               "url": "https://raw.githubusercontent.com/github/gitignore/main/Global/GPG.gitignore",
@@ -42,9 +39,7 @@
               "tolerance": 1000,
               "interrupt_exist_connections": true
             },
-            "outbounds": {
-              "addOutbounds": ["direct-out"]
-            },
+            "addOutbounds": ["direct-out"],
             "comment": "find any way"
           }
         ]
@@ -128,15 +123,36 @@
   
     // --- INCOMING CONNECTIONS (INBOUNDS) -------------------------------------
     "inbounds": [
+    // TUN Интерфейс: для прозрачного проксирования всего системного трафика (работает как VPN).
       {
         "type": "tun",
         "tag": "tun-in",
-        "interface_name": "singbox-tun0",
-        "address": ["172.16.0.1/30"],
-        "mtu": 1400,
-        "auto_route": true,
-        "strict_route": false,
-        "stack": "system"
+        "interface_name": "singbox-tun0", // Имя виртуального сетевого адаптера, создаваемого Sing-box.
+        "address": [                      // Используйте диапазон, который не пересекается с вашей реальной LAN.
+          "172.16.0.1/30"                 // Внутренний IPv4 адрес для TUN-интерфейса.
+        ],
+        "mtu": 1492,                      // Максимальный размер передаваемого блока (стандартное значение для Ethernet).
+        "auto_route": true,               // Автоматически добавлять/удалять маршруты в системную таблицу маршрутизации.
+        "strict_route": false,            // На Windows: принудительно направлять весь трафик через TUN, помогает предотвратить утечки DNS.
+        "route_exclude_address": [
+          "10.0.0.0/8",          // LAN: WG / другие VPN
+          "172.16.0.0/12",       // LAN: TUN sing-box
+          "192.168.0.0/16",      // LAN
+          "127.0.0.0/8",         // loopback
+          "169.254.0.0/16",      // link-local
+          "100.64.0.0/10",       // CGNAT (опционально)
+          "224.0.0.0/4",         // IPv4 multicast (mDNS, IGMP и т.д.)
+          "255.255.255.255/32",  // broadcast
+          "198.18.0.0/15",       // тестовый диапазон (опционально)
+          "fc00::/7",            // IPv6 unique local
+          "fe80::/10",           // IPv6 link-local
+          "ff00::/8",            // IPv6 multicast
+          "::1/128"              // IPv6 loopback
+        ],
+        "stack": "system"                // Использовать гибридный стек TCP/IP для обработки трафика на TUN интерфейсе.
+                                        // TCP - внутренний стек Sing-box, UDP - системный стек.
+        // Объект "platform" для Windows-специфичных настроек tun, таких как http_proxy,
+        // не поддерживается напрямую в этом контексте и удален.
       }
     ],
     // --- OUTGOING CONNECTIONS (OUTBOUNDS) ------------------------------------

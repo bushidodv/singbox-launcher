@@ -1,5 +1,5 @@
 // Package parsers provides parsing logic for various proxy node formats.
-// It supports VLESS, VMess, Trojan, and Shadowsocks protocols, handling
+// It supports VLESS, VMess, Trojan, Shadowsocks, and Hysteria2 protocols, handling
 // both direct links and subscription formats.
 package parsers
 
@@ -36,7 +36,8 @@ func IsDirectLink(input string) bool {
 	return strings.HasPrefix(trimmed, "vless://") ||
 		strings.HasPrefix(trimmed, "vmess://") ||
 		strings.HasPrefix(trimmed, "trojan://") ||
-		strings.HasPrefix(trimmed, "ss://")
+		strings.HasPrefix(trimmed, "ss://") ||
+		strings.HasPrefix(trimmed, "hysteria2://")
 }
 
 // ParseNode parses a single node URI and applies skip filters
@@ -107,6 +108,12 @@ func ParseNode(uri string, skipFilters []map[string]string) (*ParsedNode, error)
 					ssMethod = userinfoParts[0]
 					ssPassword = userinfoParts[1]
 					log.Printf("Parser: Successfully extracted SS credentials: method=%s, password length=%d", ssMethod, len(ssPassword))
+
+					// Validate encryption method to prevent sing-box crashes
+					if !isValidShadowsocksMethod(ssMethod) {
+						log.Printf("Parser: Warning: Invalid or unsupported Shadowsocks method '%s'. Skipping node.", ssMethod)
+						return nil, fmt.Errorf("unsupported Shadowsocks encryption method: %s", ssMethod)
+					}
 				} else {
 					log.Printf("Parser: Error: SS decoded userinfo doesn't contain ':' separator. Decoded: %s", decodedStr)
 				}
@@ -117,6 +124,8 @@ func ParseNode(uri string, skipFilters []map[string]string) (*ParsedNode, error)
 		} else {
 			log.Printf("Parser: Warning: SS link is not in SIP002 format (no @ found): %s", uri)
 		}
+	} else if strings.HasPrefix(uri, "hysteria2://") {
+		scheme = "hysteria2"
 	} else {
 		return nil, fmt.Errorf("unsupported scheme")
 	}
@@ -147,15 +156,8 @@ func ParseNode(uri string, skipFilters []map[string]string) (*ParsedNode, error)
 	// Extract port
 	port := parsedURL.Port()
 	if port == "" {
-		// Default ports
-		switch scheme {
-		case "vless", "vmess":
-			node.Port = 443
-		case "trojan":
-			node.Port = 443
-		case "ss":
-			node.Port = 443
-		}
+		// Default ports for all protocols
+		node.Port = 443
 	} else {
 		if p, err := strconv.Atoi(port); err == nil {
 			node.Port = p
@@ -165,6 +167,7 @@ func ParseNode(uri string, skipFilters []map[string]string) (*ParsedNode, error)
 	}
 
 	// Extract UUID/user
+	// For hysteria2, password is in username part of userinfo (hysteria2://password@server:port)
 	if parsedURL.User != nil {
 		node.UUID = parsedURL.User.Username()
 	}
@@ -183,14 +186,20 @@ func ParseNode(uri string, skipFilters []map[string]string) (*ParsedNode, error)
 		// Try to extract from path (some formats use path for label)
 		if parsedURL.Path != "" && parsedURL.Path != "/" {
 			node.Label = strings.TrimPrefix(parsedURL.Path, "/")
-		} else if parsedURL.User != nil {
-			// Some formats encode label in username
+		} else if parsedURL.User != nil && scheme != "hysteria2" {
+			// Some formats encode label in username (but not for hysteria2, where it's the password)
 			node.Label = parsedURL.User.Username()
 		}
 	}
 
 	// Extract tag and comment from label
 	node.Tag, node.Comment = extractTagAndComment(node.Label)
+
+	// Generate tag if missing
+	if node.Tag == "" {
+		node.Tag = generateDefaultTag(scheme, node.Server, node.Port)
+		node.Comment = node.Tag
+	}
 
 	// Normalize flag
 	node.Tag = normalizeFlagTag(node.Tag)
@@ -225,6 +234,32 @@ func decodeBase64WithPadding(s string) ([]byte, error) {
 	return decoded, err
 }
 
+// isValidShadowsocksMethod checks if the encryption method is supported by sing-box
+// This prevents invalid methods (like binary data) from causing sing-box to crash
+// Only methods supported by sing-box are allowed (see sing-box documentation)
+func isValidShadowsocksMethod(method string) bool {
+	validMethods := map[string]bool{
+		// 2022 edition (modern, best security)
+		"2022-blake3-aes-128-gcm":       true,
+		"2022-blake3-aes-256-gcm":       true,
+		"2022-blake3-chacha20-poly1305": true,
+		// AEAD ciphers
+		"none":                    true,
+		"aes-128-gcm":             true,
+		"aes-192-gcm":             true,
+		"aes-256-gcm":             true,
+		"chacha20-ietf-poly1305":  true,
+		"xchacha20-ietf-poly1305": true,
+	}
+	return validMethods[method]
+}
+
+// isValidHysteria2ObfsType checks if the obfs type is supported by sing-box for Hysteria2
+// According to sing-box documentation, only "salamander" is supported
+func isValidHysteria2ObfsType(obfsType string) bool {
+	return obfsType == "salamander"
+}
+
 func extractTagAndComment(label string) (tag, comment string) {
 	// Tag should contain the full label (including part after |)
 	tag = label
@@ -241,6 +276,11 @@ func extractTagAndComment(label string) (tag, comment string) {
 
 func normalizeFlagTag(tag string) string {
 	return strings.ReplaceAll(tag, "🇪🇳", "🇬🇧")
+}
+
+// generateDefaultTag generates a default tag for a node when tag is missing
+func generateDefaultTag(scheme, server string, port int) string {
+	return fmt.Sprintf("%s-%s-%d", scheme, server, port)
 }
 
 func shouldSkipNode(node *ParsedNode, skipFilters []map[string]string) bool {
@@ -448,9 +488,90 @@ func buildOutbound(node *ParsedNode) map[string]interface{} {
 		if password := node.Query.Get("password"); password != "" {
 			outbound["password"] = password
 		}
+	} else if node.Scheme == "hysteria2" {
+		buildHysteria2Outbound(node, outbound)
 	}
 
 	return outbound
+}
+
+// buildHysteria2Outbound builds outbound configuration for Hysteria2 protocol
+func buildHysteria2Outbound(node *ParsedNode, outbound map[string]interface{}) {
+	// Password is required (stored in UUID field from userinfo)
+	if node.UUID != "" {
+		outbound["password"] = node.UUID
+	} else {
+		log.Printf("Parser: Warning: Hysteria2 link missing password. URI might be invalid.")
+	}
+
+	// Optional: ports range (mport parameter)
+	if mport := node.Query.Get("mport"); mport != "" {
+		outbound["ports"] = mport
+	}
+
+	// Optional: obfs (obfuscation)
+	if obfs := node.Query.Get("obfs"); obfs != "" {
+		// Validate obfs type to prevent sing-box crashes
+		if !isValidHysteria2ObfsType(obfs) {
+			log.Printf("Parser: Warning: Invalid or unsupported Hysteria2 obfs type '%s'. Only 'salamander' is supported. Skipping obfs.", obfs)
+		} else {
+			obfsConfig := map[string]interface{}{
+				"type": obfs,
+			}
+			if obfsPassword := node.Query.Get("obfs-password"); obfsPassword != "" {
+				obfsConfig["password"] = obfsPassword
+			}
+			outbound["obfs"] = obfsConfig
+		}
+	}
+
+	// Optional: bandwidth (up/down in Mbps)
+	if up := node.Query.Get("upmbps"); up != "" {
+		if upMBps, err := strconv.Atoi(up); err == nil {
+			outbound["up_mbps"] = upMBps
+		}
+	}
+	if down := node.Query.Get("downmbps"); down != "" {
+		if downMBps, err := strconv.Atoi(down); err == nil {
+			outbound["down_mbps"] = downMBps
+		}
+	}
+
+	// TLS settings (required for hysteria2)
+	buildHysteria2TLS(node, outbound)
+}
+
+// buildHysteria2TLS builds TLS configuration for Hysteria2
+func buildHysteria2TLS(node *ParsedNode, outbound map[string]interface{}) {
+	sni := node.Query.Get("sni")
+
+	// Handle insecure parameter (can be "1" or "true")
+	insecure := node.Query.Get("insecure") == "true" || node.Query.Get("insecure") == "1"
+	skipCertVerify := node.Query.Get("skip-cert-verify") == "true" || node.Query.Get("skip-cert-verify") == "1"
+
+	// Always enable TLS for hysteria2 (required by protocol)
+	tlsData := map[string]interface{}{
+		"enabled": true,
+	}
+
+	// Set SNI if provided and valid (skip emoji or invalid values)
+	if sni != "" && sni != "🔒" && isValidSNI(sni) {
+		tlsData["server_name"] = sni
+	} else if node.Server != "" {
+		// Use server hostname as fallback
+		tlsData["server_name"] = node.Server
+	}
+
+	if insecure || skipCertVerify {
+		tlsData["insecure"] = true
+	}
+
+	outbound["tls"] = tlsData
+}
+
+// isValidSNI checks if SNI value is valid (contains dot or colon for hostname/IP)
+func isValidSNI(sni string) bool {
+	return strings.Contains(sni, ".") || strings.Contains(sni, ":")
 }
 
 func parseVMessJSON(vmessConfig map[string]interface{}, skipFilters []map[string]string) (*ParsedNode, error) {
@@ -494,7 +615,7 @@ func parseVMessJSON(vmessConfig map[string]interface{}, skipFilters []map[string
 		node.Tag, node.Comment = extractTagAndComment(ps)
 		node.Tag = normalizeFlagTag(node.Tag)
 	} else {
-		node.Tag = fmt.Sprintf("vmess-%s-%d", node.Server, node.Port)
+		node.Tag = generateDefaultTag("vmess", node.Server, node.Port)
 		node.Comment = node.Tag
 	}
 

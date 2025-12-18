@@ -39,6 +39,14 @@ const (
 	restartDelay      = 2 * time.Second
 )
 
+// Constants for auto-update configuration
+const (
+	autoUpdateMinInterval   = 10 * time.Minute // Minimum check interval (constant)
+	autoUpdateRetryInterval = 10 * time.Second // Interval between retry attempts
+	autoUpdateMaxRetries    = 10               // Maximum consecutive failed attempts
+	autoUpdateDefaultReload = "4h"             // Default reload interval if not specified
+)
+
 // AppController - the main structure encapsulating all application state and logic.
 // AppController is the central controller coordinating all application components.
 // It manages UI state, process lifecycle, configuration, API interactions, and logging.
@@ -114,6 +122,12 @@ type AppController struct {
 	VersionCheckMutex      sync.RWMutex // Mutex for version check cache
 	VersionCheckInProgress bool         // Flag to prevent multiple version checks
 
+	// --- Launcher version check caching ---
+	LauncherVersionCheckCache      string       // Cached latest launcher version
+	LauncherVersionCheckCacheTime  time.Time    // Time when launcher version was successfully checked
+	LauncherVersionCheckMutex      sync.RWMutex // Mutex for launcher version check cache
+	LauncherVersionCheckInProgress bool         // Flag to prevent multiple launcher version checks
+
 	// --- Context for goroutine cancellation ---
 	ctx        context.Context    // Context for cancellation
 	cancelFunc context.CancelFunc // Cancel function for stopping goroutines
@@ -129,6 +143,11 @@ type AppController struct {
 	ParserProgressBar        *widget.ProgressBar
 	ParserStatusLabel        *widget.Label
 	UpdateParserProgressFunc func(progress float64, status string) // Callback to update parser progress
+
+	// --- Auto-update configuration ---
+	AutoUpdateEnabled        bool       // Flag to enable/disable auto-updates (false after 10 failed attempts)
+	AutoUpdateFailedAttempts int        // Counter for consecutive failed attempts (reset on success)
+	AutoUpdateMutex          sync.Mutex // Mutex for auto-update state
 }
 
 // RunningState - structure for tracking the VPN's running state.
@@ -236,6 +255,16 @@ func NewAppController(appIconData, greyIconData, greenIconData, redIconData []by
 	// Initialize context for goroutine cancellation
 	ac.ctx, ac.cancelFunc = context.WithCancel(context.Background())
 
+	// Initialize auto-update state
+	ac.AutoUpdateEnabled = true
+	ac.AutoUpdateFailedAttempts = 0
+
+	// Check if config file exists before starting auto-update
+	if _, err := os.Stat(ac.ConfigPath); os.IsNotExist(err) {
+		log.Printf("Auto-update: Config file does not exist (%s), auto-update disabled", ac.ConfigPath)
+		ac.AutoUpdateEnabled = false
+	}
+	go ac.startAutoUpdateLoop()
 	return ac, nil
 }
 
@@ -289,6 +318,12 @@ func (ac *AppController) UpdateUI() {
 
 // GracefulExit performs a graceful shutdown of the application.
 func (ac *AppController) GracefulExit() {
+	// Cancel context to signal all goroutines to stop
+	if ac.cancelFunc != nil {
+		ac.cancelFunc()
+		log.Println("GracefulExit: Context cancelled, signalling goroutines to stop")
+	}
+
 	// Stop any pending menu update timer
 	ac.TrayMenuUpdateMutex.Lock()
 	if ac.TrayMenuUpdateTimer != nil {
@@ -1141,4 +1176,226 @@ func (ac *AppController) CreateTrayMenu() *fyne.Menu {
 	menuItems = append(menuItems, fyne.NewMenuItem("Quit", ac.GracefulExit))
 
 	return fyne.NewMenu("Singbox Launcher", menuItems...)
+}
+
+// startAutoUpdateLoop runs a background goroutine that periodically checks and updates configuration
+// Uses dynamic interval: max(10 minutes, parser.reload from config)
+// Handles errors with retries (10 attempts, 10 seconds between retries)
+// Resumes after successful manual update
+func (ac *AppController) startAutoUpdateLoop() {
+	log.Println("Auto-update: Starting auto-update loop")
+
+	for {
+		// Check if context is cancelled
+		select {
+		case <-ac.ctx.Done():
+			log.Println("Auto-update: Context cancelled, stopping loop")
+			return
+		default:
+		}
+
+		// Check if auto-update is enabled
+		if !ac.AutoUpdateEnabled {
+			// Auto-update is stopped, wait and check again
+			select {
+			case <-ac.ctx.Done():
+				return
+			case <-time.After(1 * time.Minute):
+				continue
+			}
+		}
+
+		// Calculate check interval from config
+		checkInterval, err := ac.calculateAutoUpdateInterval()
+		if err != nil {
+			log.Printf("Auto-update: Failed to calculate interval: %v, using default", err)
+			checkInterval = autoUpdateMinInterval
+		}
+
+		log.Printf("Auto-update: Calculated interval: %v (min: %v)", checkInterval, autoUpdateMinInterval)
+
+		// Check if update is needed immediately (before waiting)
+		requiredInterval, err := ac.calculateAutoUpdateInterval()
+		if err != nil {
+			log.Printf("Auto-update: Failed to calculate required interval: %v, using default", err)
+			requiredInterval = autoUpdateMinInterval
+		}
+
+		needsUpdate, err := ac.shouldAutoUpdate(requiredInterval)
+		if err != nil {
+			log.Printf("Auto-update: Failed to check if update needed: %v, skipping this check", err)
+			// Don't stop auto-update on check errors, just skip this check and wait
+		} else if needsUpdate {
+			// Update is needed - check if already in progress
+			ac.ParserMutex.Lock()
+			updateInProgress := ac.ParserRunning
+			ac.ParserMutex.Unlock()
+
+			if !updateInProgress {
+				log.Println("Auto-update: Update needed, attempting update...")
+				success := ac.attemptAutoUpdateWithRetries(autoUpdateRetryInterval, autoUpdateMaxRetries)
+				if success {
+					// Success - error counter already reset in attemptAutoUpdateWithRetries
+					ac.AutoUpdateMutex.Lock()
+					if !ac.AutoUpdateEnabled {
+						ac.AutoUpdateEnabled = true
+						log.Println("Auto-update: Resumed after successful update")
+					}
+					ac.AutoUpdateMutex.Unlock()
+					log.Println("Auto-update: Completed successfully, error counter reset")
+				} else {
+					// Failed after all retries - check if we reached max consecutive failures
+					ac.AutoUpdateMutex.Lock()
+					if ac.AutoUpdateFailedAttempts >= autoUpdateMaxRetries {
+						ac.AutoUpdateEnabled = false
+						ac.AutoUpdateMutex.Unlock()
+						log.Printf("Auto-update: Stopped after %d consecutive failed attempts", ac.AutoUpdateFailedAttempts)
+						fyne.Do(func() {
+							dialogs.ShowAutoHideInfo(ac.Application, ac.MainWindow, "Auto-update", "Automatic configuration update stopped after 10 failed attempts. Use manual update.")
+						})
+					} else {
+						ac.AutoUpdateMutex.Unlock()
+					}
+				}
+			} else {
+				log.Println("Auto-update: Update already in progress, skipping")
+			}
+		} else {
+			log.Printf("Auto-update: Update not needed yet, will check again in %v", checkInterval)
+		}
+
+		// Wait for check interval before next check
+		select {
+		case <-ac.ctx.Done():
+			return
+		case <-time.After(checkInterval):
+			// Time for next check
+		}
+	}
+}
+
+// calculateAutoUpdateInterval calculates the check interval: max(10 minutes, parser.reload)
+// Returns the interval to use for checking if update is needed
+func (ac *AppController) calculateAutoUpdateInterval() (time.Duration, error) {
+
+	// Read ParserConfig from file
+	config, err := ExtractParserConfig(ac.ConfigPath)
+	if err != nil {
+		// If config doesn't exist or can't be read, use default
+		defaultDuration, _ := time.ParseDuration(autoUpdateDefaultReload)
+		return maxDuration(autoUpdateMinInterval, defaultDuration), nil
+	}
+
+	// Get reload value from config
+	reloadStr := config.ParserConfig.Parser.Reload
+	if reloadStr == "" {
+		// Use default if not specified
+		defaultDuration, _ := time.ParseDuration(autoUpdateDefaultReload)
+		return maxDuration(autoUpdateMinInterval, defaultDuration), nil
+	}
+
+	// Parse reload string to duration
+	reloadDuration, err := time.ParseDuration(reloadStr)
+	if err != nil {
+		log.Printf("Auto-update: Failed to parse reload duration '%s': %v, using default", reloadStr, err)
+		defaultDuration, _ := time.ParseDuration(autoUpdateDefaultReload)
+		return maxDuration(autoUpdateMinInterval, defaultDuration), nil
+	}
+
+	// Return max(10 minutes, reload)
+	return maxDuration(autoUpdateMinInterval, reloadDuration), nil
+}
+
+// maxDuration returns the maximum of two durations
+func maxDuration(a, b time.Duration) time.Duration {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// shouldAutoUpdate checks if configuration update is needed
+// Returns true if elapsed time since last_updated >= required interval
+func (ac *AppController) shouldAutoUpdate(requiredInterval time.Duration) (bool, error) {
+	// Read ParserConfig from file
+	config, err := ExtractParserConfig(ac.ConfigPath)
+	if err != nil {
+		// If config doesn't exist, update is needed
+		return true, nil
+	}
+
+	// Check last_updated
+	lastUpdatedStr := config.ParserConfig.Parser.LastUpdated
+	if lastUpdatedStr == "" {
+		// No last_updated - update is needed
+		return true, nil
+	}
+
+	// Parse last_updated timestamp
+	lastUpdated, err := time.Parse(time.RFC3339, lastUpdatedStr)
+	if err != nil {
+		log.Printf("Auto-update: Failed to parse last_updated '%s': %v", lastUpdatedStr, err)
+		// If parsing fails, assume update is needed
+		return true, nil
+	}
+
+	// Calculate elapsed time
+	elapsed := time.Since(lastUpdated.UTC())
+	log.Printf("Auto-update: Checking if update needed (last_updated: %s, elapsed: %v, required: %v)", lastUpdatedStr, elapsed, requiredInterval)
+
+	// Check if elapsed >= required interval
+	return elapsed >= requiredInterval, nil
+}
+
+// attemptAutoUpdateWithRetries attempts to update configuration with retries
+// Returns true if update succeeded, false if all retries failed
+func (ac *AppController) attemptAutoUpdateWithRetries(retryInterval time.Duration, maxRetries int) bool {
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		log.Printf("Auto-update: Attempting update (attempt %d/%d)", attempt, maxRetries)
+
+		// Call UpdateConfigFromSubscriptions synchronously
+		err := ac.ConfigService.UpdateConfigFromSubscriptions()
+		if err == nil {
+			// Success - reset error counter
+			ac.AutoUpdateMutex.Lock()
+			ac.AutoUpdateFailedAttempts = 0
+			ac.AutoUpdateMutex.Unlock()
+			return true
+		}
+
+		// Error occurred - increment error counter
+		ac.AutoUpdateMutex.Lock()
+		ac.AutoUpdateFailedAttempts++
+		currentAttempts := ac.AutoUpdateFailedAttempts
+		ac.AutoUpdateMutex.Unlock()
+
+		log.Printf("Auto-update: Failed (attempt %d/%d, total consecutive failures: %d): %v", attempt, maxRetries, currentAttempts, err)
+
+		if attempt < maxRetries {
+			// Wait before retry (except for last attempt)
+			log.Printf("Auto-update: Retrying in %v...", retryInterval)
+			select {
+			case <-ac.ctx.Done():
+				return false
+			case <-time.After(retryInterval):
+				// Continue to next attempt
+			}
+		}
+	}
+
+	// All retries failed
+	return false
+}
+
+// resumeAutoUpdate resumes automatic updates after successful manual update
+// Should be called after successful UpdateConfigFromSubscriptions
+func (ac *AppController) resumeAutoUpdate() {
+	ac.AutoUpdateMutex.Lock()
+	defer ac.AutoUpdateMutex.Unlock()
+
+	ac.AutoUpdateFailedAttempts = 0
+	if !ac.AutoUpdateEnabled {
+		ac.AutoUpdateEnabled = true
+		log.Println("Auto-update: Resumed after successful manual update")
+	}
 }

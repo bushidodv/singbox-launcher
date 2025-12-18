@@ -218,7 +218,7 @@ func TestIntegration_ParserConfigFlow(t *testing.T) {
 					LastUpdated string `json:"last_updated,omitempty"`
 				} `json:"parser,omitempty"`
 			}{
-				Version: 2,
+				Version: 3,
 				Proxies: []ProxySource{
 					{
 						Source:      "",

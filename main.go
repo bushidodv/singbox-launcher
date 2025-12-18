@@ -2,6 +2,7 @@ package main
 
 import (
 	_ "embed" // For embedding resource files (icons)
+	"flag"
 	"log"
 	"time"
 
@@ -24,14 +25,27 @@ var greyIconData []byte // Icon for "off" state
 //go:embed assets/on.ico
 var greenIconData []byte // Icon for "on" state
 
+// Constants
+const (
+	autoStartDelay = 1 * time.Second // Delay before auto-starting VPN with -start parameter
+)
+
 // main is the application's entry point. It simply creates and runs the AppController.
 func main() {
+	// Parse command line arguments
+	autoStart := flag.Bool("start", false, "Automatically start VPN on launch")
+	startInTray := flag.Bool("tray", false, "Start minimized to system tray (hide window on launch)")
+	flag.Parse()
+
 	// Create the application controller. If an error occurs, print it and exit the program.
 	// Use greyIconData for red icon (no separate red icon yet)
 	controller, err := core.NewAppController(appIconData, greyIconData, greenIconData, greyIconData)
 	if err != nil {
 		log.Fatalf("Failed to initialize application: %v", err)
 	}
+
+	// Check launcher version on startup
+	controller.CheckLauncherVersionOnStartup()
 
 	// Configure the system tray if the application is running on a Desktop platform.
 	if desk, ok := controller.Application.(desktop.App); ok {
@@ -129,6 +143,28 @@ func main() {
 					len(config.ParserConfig.Proxies),
 					len(config.ParserConfig.Outbounds))
 			}()
+
+			// Auto-start VPN if -start flag is provided
+			if *autoStart {
+				go func() {
+					// Wait a bit for everything to initialize
+					time.Sleep(autoStartDelay)
+					log.Println("Auto-start: Starting VPN due to -start parameter")
+					core.StartSingBoxProcess(controller)
+				}()
+			}
+
+			// Hide window if -tray flag is provided
+			if *startInTray {
+				go func() {
+					// Wait a bit for window to be fully initialized
+					time.Sleep(500 * time.Millisecond)
+					fyne.Do(func() {
+						controller.MainWindow.Hide()
+						log.Println("Tray mode: Window hidden")
+					})
+				}()
+			}
 		})
 	}
 
